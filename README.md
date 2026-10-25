@@ -116,7 +116,7 @@ bun run bench
 
 Tests use deterministic fixtures without network access or credentials. Benchmarks measure synthetic pages, not production coverage or speed relative to other libraries. Build tooling requires Bun; Node consumers use the generated ESM bundle.
 
-Pull requests run CI on Node 22/24 and Bun, including installing and exercising the packed package. `check:package` requires npm and network access to install public dependencies. After CI passes on `main`, an unreleased package version gets a GitHub release and npm publication; change `package.json` in a reviewed PR to release the next version. Existing version tags are never moved.
+Pull requests run CI on Node 22/24 and Bun, including installing and exercising the packed package. `check:package` requires npm and network access to install public dependencies. After CI passes on `main`, an unreleased package version gets a GitHub release and npm publication through a configured npm trusted publisher (OIDC, without a stored npm token); change `package.json` in a reviewed PR to release the next version. Existing version tags are never moved.
 
 For extraction bugs, [open an issue](https://github.com/sfsajid91/omniscrape/issues) with minimal sanitized HTML, its page URL, and the expected result. Never include credentials, session data, or private contact information.
 

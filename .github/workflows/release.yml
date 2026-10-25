@@ -94,7 +94,6 @@ jobs:
         run: bun run scripts/release.ts "$RUNNER_TEMP/npm-package"
         env:
           GH_TOKEN: ${{ github.token }}
-          # Prefer npm OIDC trusted publishing for this release.yml workflow.
-          # Optional bootstrap secret: granular token with publish + bypass-2FA.
-          # Remove NPM_TOKEN after trusted publishing is configured and verified.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # npm authenticates through GitHub OIDC, never a stored npm token.
+          # Configure release.yml as the package's npm trusted publisher and
+          # explicitly allow npm publish (stage-only requires human approval).
