@@ -34,6 +34,7 @@
     "build:types": "tsc -p tsconfig.build.json",
     "test": "bun test tests",
     "bench": "bun run scripts/benchmark.ts",
+    "check:package": "bun run scripts/package-smoke.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build"
   },
