@@ -1,0 +1,74 @@
+{
+  "name": "@sfsajid91/omniscrape",
+  "version": "0.1.0",
+  "description": "HTML metadata and author parser with source-aware JSON-LD, DOM, and hydration extraction",
+  "homepage": "https://github.com/sfsajid91/omniscrape#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sfsajid91/omniscrape.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sfsajid91/omniscrape/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun run build:bundle && bun run build:types",
+    "build:bundle": "bun build src/index.ts --outdir ./dist --target node --format esm",
+    "build:types": "tsc -p tsconfig.build.json",
+    "test": "bun test tests",
+    "bench": "bun run scripts/benchmark.ts",
+    "check:package": "bun run scripts/package-smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "scraper",
+    "author-extraction",
+    "provenance",
+    "web-scraper",
+    "metascraper",
+    "metadata-extractor",
+    "nextjs",
+    "next-data",
+    "nuxt",
+    "nuxt-data",
+    "hydration",
+    "ssr",
+    "json-ld",
+    "cms",
+    "quintype",
+    "bun"
+  ],
+  "author": "sfsajid91",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "acorn": "^8.19.0",
+    "devalue": "^6.0.3",
+    "linkedom": "^0.18.0",
+    "zod": "^3.22.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3",
+    "typescript": "^5.9.3"
+  }
+}
