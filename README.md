@@ -1,13 +1,14 @@
-# Omniscrape
+# Omniscrape Blueprint
 
-Extract publisher metadata and author profiles from HTML, including data hidden in Next.js, Nuxt, and CMS hydration payloads.
+## System Overview
+Omniscrape is an HTML metadata and author attribution parser designed to extract publisher metadata and author profiles from HTML documents, including data embedded in Next.js (`__NEXT_DATA__` and React Flight server components), Nuxt (2 and 3), Quintype/Bold, Fenrir, and generic framework hydration payloads.
 
-- **Source-aware:** accepted fields include their source URL, path, scope, and confidence.
-- **Identity-aware:** distinguish authors, co-authors, and editorial owners. Ambiguous identities and conflicting values stay in `review`.
-- **Static:** no network requests, browser, or page-script execution.
-- **Typed:** TypeScript types and Zod output schemas. Bun and Node.js ESM.
+- **Source-aware:** Accepted fields track their provenance (source URL, DOM/JSON path, scope, and confidence).
+- **Identity-aware:** Distinguishes authors, co-authors, and editorial owners. Ambiguous identities and conflicting candidate attributes are quarantined in `review`.
+- **Static:** Operates purely via static analysis without network requests, browser sandboxes, or page script execution.
+- **Typed:** Provides TypeScript type definitions and Zod validation schemas with ESM support for Bun and Node.js.
 
-## Install
+### Installation
 
 ```sh
 npm install @sfsajid91/omniscrape
@@ -15,9 +16,9 @@ npm install @sfsajid91/omniscrape
 bun add @sfsajid91/omniscrape
 ```
 
-> The first release is `0.1.0`. Registry installation is available once it is published.
+> The initial release is `0.1.0`. Registry installation is available once published.
 
-## Usage
+### Usage
 
 ```typescript
 import { parseHtml } from "@sfsajid91/omniscrape";
@@ -45,7 +46,7 @@ result.review;       // Unresolved identities and conflicting values
 result.issues;       // Malformed, unsupported, or resource-limited sources
 ```
 
-Fetch HTML with your own client and pass the final response URL:
+Callers fetch HTML with their own client and supply the final response URL:
 
 ```typescript
 const response = await fetch("https://publisher.example/authors/alice");
@@ -53,15 +54,13 @@ if (!response.ok) throw new Error(`HTTP ${response.status}`);
 const result = parseHtml(await response.text(), response.url);
 ```
 
-Fetching, redirects, timeouts, retries, and download-size limits belong to the caller.
+Network requests, redirects, timeouts, retries, and transfer limits belong entirely to the caller.
 
-## Why not just Metascraper?
+### Comparison with Metascraper
 
-[Metascraper](https://github.com/microlinkhq/metascraper) already extracts JSON-LD, microdata, meta tags, and DOM bylines. Omniscrape focuses on a different requirement: decoding hydration data and resolving **which person each field belongs to**, with provenance and explicit conflict handling.
+[Metascraper](https://github.com/microlinkhq/metascraper) focuses on general metadata extraction across JSON-LD, microdata, meta tags, and DOM bylines. Omniscrape targets decoding framework hydration payloads, linking disparate sources, and determining person-level attribution with explicit conflict handling and provenance trails.
 
-Use Metascraper when its general metadata model fits. Use Omniscrape when you need hydration-aware publisher/author extraction and reviewable identity attribution. It is not a drop-in replacement or a claim of universal coverage or better performance.
-
-## Supported sources
+### Supported Sources
 
 | Source | Support |
 |---|---|
@@ -73,37 +72,43 @@ Use Metascraper when its general metadata model fits. Use Omniscrape when you ne
 | JSON-LD | ProfilePage, Article authors, cross-script `@id` references, and article lists |
 | DOM / meta | Scoped author/byline details, contacts, page metadata, and article headline links |
 
-Recognized layouts only—not arbitrary application state or the full React Flight protocol. Page JavaScript and custom Nuxt revivers are never executed. A failed source does not prevent extraction from other sources.
+### API Specification
 
-## API
+#### `parseHtml(html, pageUrl, options?)`
 
-### `parseHtml(html, pageUrl, options?)`
-
-Synchronous. Returns a [`ParserOutput`](src/types.ts). `pageUrl` must be an absolute HTTP(S) URL without credentials.
+Synchronous parser returning [`ParserOutput`](./src/types.ts). `pageUrl` must be an absolute HTTP(S) URL without user credentials.
 
 | Option | Default | Purpose |
 |---|---:|---|
 | `maxHtmlBytes` | 8 MiB | Reject oversized HTML by UTF-8 byte length |
-| `maxScriptBytes` | 2 MiB | Skip oversized scripts and record an issue |
-| `maxDecodeNodes` | 50,000 | Bound decoder/traversal work |
-| `maxDecodeDepth` | 128 | Bound hydration/graph traversal depth |
+| `maxScriptBytes` | 2 MiB | Skip oversized scripts and record a diagnostic issue |
+| `maxDecodeNodes` | 50,000 | Bound decoder and graph traversal operations |
+| `maxDecodeDepth` | 128 | Bound recursion depth in hydration/JSON graphs |
 | `includeRawHydration` | `false` | Include a bounded, JSON-safe diagnostic snapshot |
 
-Numeric limits must be positive safe integers. Invalid URLs throw `TypeError`; invalid limits and oversized HTML throw `RangeError`. Individual source failures generally appear in `issues`. HTML size is checked after download, not during it.
+Numeric limit options must be positive safe integers. Invalid URLs throw `TypeError`; invalid limits and oversized HTML throw `RangeError`.
 
-The package exports `parseHtml`, `ParseOptions`, `ExtractionLimits`, output types, and output schemas such as `ParserOutputSchema`. Bun loads the TypeScript entrypoint; Node loads the built ESM bundle. No CommonJS entrypoint.
+## Subdirectories & System Boundaries
+- [Source Engine (`src`)](./src/README.md): Primary library source code defining `parseHtml`, Zod schemas, TypeScript types, value normalizers, and the core resolution pipeline.
+  - [Core Engine (`src/core`)](./src/core/README.md): In-memory execution context, evidence candidate collection, and identity conflict resolution engine.
+  - [Extractors (`src/extractors`)](./src/extractors/README.md): Specialized extraction modules for DOM/meta tags, JSON-LD graphs, and framework hydration states.
+- [Developer & Release Scripts (`scripts`)](./scripts/README.md): CI verification utilities, packaging smoke tests (`package-smoke.ts`), synthetic benchmarks (`benchmark.ts`), and release tag tooling.
 
-### Attribution
+## Global Invariants
+- **Identity Integrity**: Author profiles merge solely on explicit profile URLs or publisher-namespaced IDs, never on matching names alone. Equal slugs cannot override distinct profile URLs or CMS IDs.
+- **Role Isolation**: Article authors are strictly isolated from editorial owners, related story authors, session users, and generic site bylines.
+- **Conflict Quarantine**: Ambiguous identities, unlinked co-authors, and conflicting field values are held in `review` with their respective evidence rather than guessed.
+- **Fail-Safe Extraction**: Failures or syntax errors in individual script tags or hydration payloads record diagnostic `issues` and never abort parsing of remaining sources.
+- **Resource Bounds**: Execution adheres to strict resource thresholds (`maxHtmlBytes`, `maxScriptBytes`, `maxDecodeNodes`, `maxDecodeDepth`) to protect against resource exhaustion and denial of service. Limit options must be positive safe integers; invalid limits and oversized HTML throw `RangeError`.
+- **Deterministic & Zero-I/O**: Pure synchronous evaluation without network requests, disk persistence, or browser script execution.
 
-- Merge people only through explicit profile URLs or identifiers, never matching names alone. A CMS-ID/slug bridge requires the same publisher namespace; equal slugs do not override distinct profile URLs or CMS IDs.
-- Keep article authors separate from editorial owners, related-story authors, session users, and bylines in footers or comments.
-- Withhold ambiguous identities and conflicting attributes; retain their evidence in `review`.
-- Return `author.name` as `"Unknown Author"` and `authors` as `[]` when no target is resolved.
-- Treat confidence as source strength, not a calibrated probability. Do not infer missing contacts or expand initials.
+## Global Side Effects
+- None. Omniscrape performs pure in-memory compute on provided string buffers and returns immutable structured objects.
 
-Each provenance entry includes `field`, `value`, `source`, `sourceUrl`, `sourcePath`, `scope`, and `confidence`. Article discoveries are deduplicated by URL while preserving separate evidence. DOM fallback discovery is capped at 20 unique articles; structured collections have their own traversal limits.
+## System Verification
+- Run: `bun test tests`
 
-## Development
+### Development Workflows
 
 ```sh
 bun install --frozen-lockfile
@@ -114,12 +119,5 @@ bun run check:package
 bun run bench
 ```
 
-Tests use deterministic fixtures without network access or credentials. Benchmarks measure synthetic pages, not production coverage or speed relative to other libraries. Build tooling requires Bun; Node consumers use the generated ESM bundle.
-
-Pull requests run CI on Node 22/24 and Bun, including installing and exercising the packed package. `check:package` requires npm and network access to install public dependencies. After CI passes on `main`, an unreleased package version gets a GitHub release and npm publication through a configured npm trusted publisher (OIDC, without a stored npm token); change `package.json` in a reviewed PR to release the next version. Existing version tags are never moved.
-
-For extraction bugs, [open an issue](https://github.com/sfsajid91/omniscrape/issues) with minimal sanitized HTML, its page URL, and the expected result. Never include credentials, session data, or private contact information.
-
 ## License
-
 [MIT](LICENSE) © 2026 sfsajid91.
