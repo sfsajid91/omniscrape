@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+parser/test-results.json
+test-results.json
+.env
