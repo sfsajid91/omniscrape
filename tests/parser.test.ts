@@ -113,6 +113,67 @@ describe("identity-safe public parser", () => {
     expect(result.review).toEqual([]);
   });
 
+  test.each([
+    ["different publishers", "https://one.example/authors/alex", "https://two.example/authors/alex"],
+    ["different profile paths", "https://publisher.example/authors/alex", "https://publisher.example/contributors/alex"],
+  ])("does not merge equal slugs across %s", (_label, firstUrl, secondUrl) => {
+    const result = parseHtml(next({
+      author: { name: "Alex Smith", url: firstUrl },
+      profile: { name: "Alex Smith", url: secondUrl, email: "second@example.org" },
+    }), page);
+    expect(result.author).toEqual({ name: "Unknown Author", socials: [] });
+    expect(result.authors).toEqual([]);
+    expect(result.provenance.some(({ field }) => field === "author.email")).toBe(false);
+    expect(result.review.some(({ author }) => author.email === "second@example.org")).toBe(true);
+    expect(new Set(result.review.flatMap(({ provenance }) => provenance.map(({ entity }) => entity)))).toEqual(new Set([firstUrl, secondUrl]));
+  });
+
+  test("does not bridge a publisher CMS slug to an external profile", () => {
+    const result = parseHtml(next({ author: { name: "Alex Smith", id: 7, slug: "alex", email: "cms@example.org" } }) +
+      ld(profile("Alex Smith", { url: "https://other.example/authors/alex" })), page);
+    expect(result.author.email).toBeUndefined();
+    expect(result.review.some(({ author }) => author.email === "cms@example.org")).toBe(true);
+    expect(result.provenance.some(({ field }) => field === "author.email")).toBe(false);
+  });
+
+  test("does not merge distinct CMS IDs with the same slug", () => {
+    const result = parseHtml(next({
+      author: { name: "Alex Smith", id: 7, slug: "alex" },
+      profile: { name: "Alex Smith", id: 8, slug: "alex", email: "second@example.org" },
+    }), page);
+    expect(result.author).toEqual({ name: "Unknown Author", socials: [] });
+    expect(result.review.map(({ author }) => author.id).sort()).toEqual([7, 8]);
+  });
+
+  test.each(["byline primary", "primary entry-author", "primary\tc-entry-author\ncompact"])(
+    "reads a plain-text author from multiple classes: %s", (classes) => {
+      const result = parseHtml(`<div class="${classes}">By Alice Reporter</div>`, "https://publisher.example/story");
+      expect(result.author.name).toBe("Alice Reporter");
+      expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter"]);
+      expect(result.provenance.find(({ field }) => field === "author.name")).toMatchObject({ scope: "byline", confidence: "high" });
+    },
+  );
+
+  test.each([
+    ["footer", "<footer>", "</footer>"],
+    ["comments", '<section class="comments">', "</section>"],
+    ["related", '<section class="related">', "</section>"],
+    ["recommendations", '<section class="recommendations">', "</section>"],
+    ["comment microdata", '<section itemprop="comment">', "</section>"],
+  ])("excludes unmarked linked bylines in %s", (_label, open, close) => {
+    const unrelated = `${open}<p>By <a href="/authors/site-editor">Site Editor</a></p>${close}`;
+    const isolated = parseHtml(unrelated, "https://publisher.example/story");
+    expect(isolated.author).toEqual({ name: "Unknown Author", socials: [] });
+    expect(isolated.authors).toEqual([]);
+    expect(isolated.review).toEqual([]);
+    expect(isolated.provenance.some(({ field }) => field.startsWith("author."))).toBe(false);
+
+    const withByline = parseHtml(`<p>By <a href="/authors/alice">Alice Reporter</a></p>${unrelated}`, "https://publisher.example/story");
+    expect(withByline.author.name).toBe("Alice Reporter");
+    expect(withByline.authors.map(({ name }) => name)).toEqual(["Alice Reporter"]);
+    expect(withByline.review).toEqual([]);
+  });
+
   test("does not report a same-name unanchored byline as a different person", () => {
     const result = parseHtml(`<meta name="author" content="Alice Reporter"><div class="byline"><a rel="author" href="/author/alice">Alice Reporter</a></div>`, "https://publisher.example/story");
     expect(result.author.name).toBe("Alice Reporter");

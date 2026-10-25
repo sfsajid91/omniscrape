@@ -95,8 +95,8 @@ The package exports `parseHtml`, `ParseOptions`, `ExtractionLimits`, output type
 
 ### Attribution
 
-- Merge people only through explicit profile URLs or identifiers, never matching names alone.
-- Keep article authors separate from editorial owners, related-story authors, and session users.
+- Merge people only through explicit profile URLs or identifiers, never matching names alone. A CMS-ID/slug bridge requires the same publisher namespace; equal slugs do not override distinct profile URLs or CMS IDs.
+- Keep article authors separate from editorial owners, related-story authors, session users, and bylines in footers or comments.
 - Withhold ambiguous identities and conflicting attributes; retain their evidence in `review`.
 - Return `author.name` as `"Unknown Author"` and `authors` as `[]` when no target is resolved.
 - Treat confidence as source strength, not a calibrated probability. Do not infer missing contacts or expand initials.

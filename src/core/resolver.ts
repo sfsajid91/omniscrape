@@ -59,11 +59,23 @@ function sameIdentity(a: AuthorCandidate, b: AuthorCandidate): boolean {
   const left = normalizedIdentity(a.identity);
   const right = normalizedIdentity(b.identity);
   if (left && right && left === right) return true;
-  // A publisher-namespaced slug is an explicit identifier, so it can link a
-  // profile URL to a CMS-author-ID candidate for the same page.
+  // Bridge a CMS ID to a profile URL only within its publisher namespace.
+  // Slugs must never override distinct URLs or distinct CMS IDs.
   const leftSlug = slugOf(a);
   const rightSlug = slugOf(b);
-  return !!leftSlug && !!rightSlug && leftSlug === rightSlug;
+  if (!left || !right || !leftSlug || leftSlug !== rightSlug) return false;
+  const leftIsUrl = /^https?:\/\//i.test(left);
+  const rightIsUrl = /^https?:\/\//i.test(right);
+  if (leftIsUrl === rightIsUrl) return false;
+  const cms = leftIsUrl ? b : a;
+  const source = cms.evidence.id?.source;
+  if (cms.profile.id === undefined || !source?.startsWith("hydration:")) return false;
+  try {
+    const profileUrl = new URL(leftIsUrl ? left : right);
+    return cms.identity === `${source.slice("hydration:".length)}@${profileUrl.host.toLowerCase()}:${String(cms.profile.id)}`;
+  } catch {
+    return false;
+  }
 }
 
 function rank(candidate: AuthorCandidate): number {

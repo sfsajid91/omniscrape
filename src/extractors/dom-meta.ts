@@ -251,8 +251,7 @@ function authorsFromScope(scope: ParserElement, context: PageContext, currentUrl
  const allowScopedHeading = scope.matches(".author-header, .author-profile, .author-detail, header[class*='author-page']") || pageProfileScope;
  const nameElement = guardian?.heading ?? (archivedBioScope ? scope.querySelector("h2.branding__title") :
   allowScopedHeading ? profileHeading : first(scope, NAME_SELECTORS) ?? (scope.matches("[itemprop='author']") ? scope.querySelector("[itemprop='name']") : null));
- const scopeClasses = scope.getAttribute("class") ?? "";
- const plainByline = /(?:^|\\s)(?:byline|entry-author|c-entry-author)(?:\\s|$)/.test(scopeClasses) || scope.matches("[rel~='author'], [role='author'], [data-testid*='author' i], [data-author]");
+ const plainByline = scope.matches(".byline, .entry-author, .c-entry-author, [rel~='author'], [role='author'], [data-testid*='author' i], [data-author]");
  const label = nameElement?.querySelector(".author__title-desc");
  const nameSource = nameElement?.getAttribute("content") ?? (label && text(label.textContent) === "Author"
   ? (nameElement?.textContent ?? "").replace(label.textContent ?? "", " ")
@@ -331,6 +330,8 @@ function unmarkedLinkedBylines(doc: Document, context: PageContext, currentUrls:
  for (const paragraph of doc.querySelectorAll("p")) {
   if (!/^(?:by|written by)\b/i.test(text(paragraph.textContent) ?? "")) continue;
   for (const anchor of paragraph.querySelectorAll("a[href]")) {
+   if (isExcludedAttributionScope(anchor) ||
+    anchor.closest(".related, .related-articles, .recommendations, .comments, .comment, [itemprop='comment']")) continue;
    if (anchor.closest(".byline, .entry-author, .c-entry-author, [rel~='author'], [role='author'], [itemprop='author']") ||
     isListingAttributionScope(anchor, currentUrls, context.baseUrl)) continue;
    const name = personName(anchor.textContent);
@@ -344,7 +345,7 @@ function unmarkedLinkedBylines(doc: Document, context: PageContext, currentUrls:
     const slug = new URL(href).pathname.split("/").filter(Boolean).at(-1);
     if (slug) { profile.slug = slug; evidence.slug = ev("dom-author", `${elementPath(anchor)}@href`, "byline", "high"); }
    }
-   candidates.push({ profile, ...(identity ? { identity } : {}), primary: true, evidence, ...(social ? { socialEvidence: [ev("dom-author", `${elementPath(anchor)}@href`, "byline", "high")] } : {}), ...(!paragraph.closest(".related, .related-articles, .recommendations, .comments, .comment, [itemprop='comment']") ? { authorshipGroups: [`dom:${elementPath(paragraph)}`] } : {}) });
+   candidates.push({ profile, ...(identity ? { identity } : {}), primary: true, evidence, ...(social ? { socialEvidence: [ev("dom-author", `${elementPath(anchor)}@href`, "byline", "high")] } : {}), authorshipGroups: [`dom:${elementPath(paragraph)}`] });
   }
  }
  return candidates;
