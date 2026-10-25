@@ -17,6 +17,36 @@ export interface ParseOptions extends Partial<ExtractionLimits> {
    * Defaults to false.
    */
   includeRawHydration?: boolean;
+
+  /**
+   * Whether to include field-level provenance records for articles in the catalog (`articles[i].*`).
+   * When false, provenance only tracks author, editorial, and page metadata, slashing payload size on listing pages.
+   * Defaults to true.
+   */
+  includeArticleProvenance?: boolean;
+
+  /**
+   * Granularity mode for article provenance records when `includeArticleProvenance` is true:
+   * - "property": Emits individual records for title, url, and publishedAt per article (default).
+   * - "item": Emits a single consolidated `articles[i]` record per article, reducing records by ~65%.
+   * Defaults to "property".
+   */
+  articleProvenanceMode?: "property" | "item";
+
+  /**
+   * Provenance collection scope:
+   * - "all": Collects provenance across all entities (author, editorial, metadata, articles) (default).
+   * - "identity": Only collects provenance for author, editorial, and page metadata (omits catalog articles).
+   * - "none": Disables provenance collection entirely (`output.provenance = []`).
+   * Defaults to "all".
+   */
+  provenanceScope?: "all" | "identity" | "none";
+
+  /**
+   * When true, suppresses redundant `authors[0].*` provenance records when there is a single author matching `author`.
+   * Defaults to false.
+   */
+  dedupeAuthorProvenance?: boolean;
 }
 
 /**
@@ -125,5 +155,16 @@ export function parseHtml(
   const hydration = extractHydrationData(context);
   const jsonLd = extractJsonLd(context);
   const domMeta = extractDomAndMeta(context);
-  return resolveParserOutput({ context, techStack, hydration, jsonLd, domMeta, includeRawHydration: options?.includeRawHydration ?? false });
+  return resolveParserOutput({
+    context,
+    techStack,
+    hydration,
+    jsonLd,
+    domMeta,
+    includeRawHydration: options?.includeRawHydration ?? false,
+    includeArticleProvenance: options?.includeArticleProvenance,
+    articleProvenanceMode: options?.articleProvenanceMode,
+    provenanceScope: options?.provenanceScope,
+    dedupeAuthorProvenance: options?.dedupeAuthorProvenance,
+  });
 }

@@ -15,6 +15,10 @@ export interface ResolverInput {
   jsonLd: JsonLdResult;
   domMeta: DomMetaResult;
   includeRawHydration?: boolean;
+  includeArticleProvenance?: boolean;
+  articleProvenanceMode?: "property" | "item";
+  provenanceScope?: "all" | "identity" | "none";
+  dedupeAuthorProvenance?: boolean;
 }
 
 const AUTHOR_FIELDS = ["name", "givenName", "familyName", "id", "slug", "designation", "bio", "avatarUrl", "email"] as const;
@@ -281,11 +285,13 @@ function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidat
   return true;
 }
 
-function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], author: AuthorProfile, provenance: ProvenanceItem[]): AuthorProfile[] {
+function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], author: AuthorProfile, provenance: ProvenanceItem[], dedupeAuthorProvenance = false): AuthorProfile[] {
   if (author.name !== "Unknown Author") {
-    const authorProvenance: ProvenanceItem[] = [];
-    resolveAuthor(context, candidates, authorProvenance, [], "authors[0]");
-    provenance.push(...authorProvenance);
+    if (!dedupeAuthorProvenance) {
+      const authorProvenance: ProvenanceItem[] = [];
+      resolveAuthor(context, candidates, authorProvenance, [], "authors[0]");
+      provenance.push(...authorProvenance);
+    }
     return [author];
   }
   const primary = candidates.filter((candidate) => candidate.primary && !!candidate.profile.name && !!candidate.evidence.name)
@@ -318,9 +324,24 @@ function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], aut
   return authors;
 }
 
-function resolveArticles(context: PageContext, sources: ExtractedData[], provenance: ProvenanceItem[]): ArticleItem[] {
+function resolveArticles(
+  context: PageContext,
+  sources: ExtractedData[],
+  provenance: ProvenanceItem[],
+  options?: {
+    includeArticleProvenance?: boolean;
+    articleProvenanceMode?: "property" | "item";
+    provenanceScope?: "all" | "identity" | "none";
+  },
+): ArticleItem[] {
   const articles: ArticleItem[] = [];
   const byUrl = new Map<string, number>();
+  const trackProvenance =
+    options?.includeArticleProvenance !== false &&
+    options?.provenanceScope !== "identity" &&
+    options?.provenanceScope !== "none";
+  const itemMode = options?.articleProvenanceMode === "item";
+
   for (const source of sources) {
     for (const candidate of source.articles) {
       const { article, evidence, fieldPaths } = candidate;
@@ -332,12 +353,17 @@ function resolveArticles(context: PageContext, sources: ExtractedData[], provena
       }
       const accepted = articles[index]!;
       if (!accepted.publishedAt && article.publishedAt) accepted.publishedAt = article.publishedAt;
-      for (const field of ["title", "url", "publishedAt"] as const) {
-        const value = article[field];
-        if (value === undefined || value !== accepted[field]) continue;
-        provenance.push(provenanceItem(context, `articles[${index}].${field}`, value, {
-          ...evidence, sourcePath: fieldPaths?.[field] ?? `${evidence.sourcePath}.${field}`,
-        }));
+      if (!trackProvenance) continue;
+      if (itemMode) {
+        provenance.push(provenanceItem(context, `articles[${index}]`, accepted.url, evidence));
+      } else {
+        for (const field of ["title", "url", "publishedAt"] as const) {
+          const value = article[field];
+          if (value === undefined || value !== accepted[field]) continue;
+          provenance.push(provenanceItem(context, `articles[${index}].${field}`, value, {
+            ...evidence, sourcePath: fieldPaths?.[field] ?? `${evidence.sourcePath}.${field}`,
+          }));
+        }
       }
     }
   }
@@ -440,10 +466,13 @@ export function resolveParserOutput(input: ResolverInput): ParserOutput {
   const review: ReviewAuthor[] = [];
   const authorCandidates = sources.flatMap((source) => source.authors);
   const author = resolveAuthor(context, authorCandidates, collected, review);
-  const authors = resolveAuthors(context, authorCandidates, author, collected);
-  const articles = resolveArticles(context, sources, collected);
+  const authors = resolveAuthors(context, authorCandidates, author, collected, input.dedupeAuthorProvenance ?? false);
+  const articles = resolveArticles(context, sources, collected, input);
   const { editorial, metadata } = resolveFields(context, sources, collected);
-  const provenance = dedupeProvenance(collected);
+  const rawProvenance = input.provenanceScope === "none" ? [] : dedupeProvenance(collected);
+  const provenance = input.provenanceScope === "identity"
+    ? rawProvenance.filter((item) => !item.field.startsWith("articles["))
+    : rawProvenance;
   return ParserOutputSchema.parse({
     url: context.pageUrl, parsedAt: new Date().toISOString(), techStack: input.techStack,
     author, authors, editorial, articles, metadata, provenance, review, issues: context.issues,
