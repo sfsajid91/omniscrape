@@ -12,6 +12,26 @@ const MAX_ARTICLES = 20;
 const MAX_ARTICLE_TITLE = 300;
 const MAX_BIO = 2000;
 const MAX_ROLE = 200;
+const HEADLINE_SELECTOR = "h1, h2, h3, h4, h5, h6, [data-testid*='headline' i], .card-title, .story-title, .post-title, .article-title, .headline, .entry-title";
+const EDITORIAL_JOB_TITLES = new Set([
+ "editor", "senior editor", "assistant editor", "senior assistant editor",
+ "managing editor", "associate editor", "executive editor", "editor-in-chief",
+ "reporter", "senior reporter", "chief reporter", "investigative reporter",
+ "bureau chief", "correspondent", "senior correspondent", "staff writer",
+ "columnist", "contributor", "senior contributor", "freelance writer"
+]);
+
+function isJobTitle(value: string): boolean {
+ return EDITORIAL_JOB_TITLES.has(value.trim().toLowerCase());
+}
+
+function cleanBylineText(element: ParserElement): string {
+ const clone = element.cloneNode(true) as ParserElement;
+ for (const unwanted of clone.querySelectorAll('a[href^="mailto:"], button, svg, time, .email, [data-email], .author__title-desc')) {
+  unwanted.remove();
+ }
+ return clone.textContent ?? "";
+}
 const AUTHOR_SCOPE = [
  "[role='author']", "[itemtype*='Person' i]", "[itemprop='author']", "[rel~='author']",
  ".byline", ".entry-author", ".c-entry-author", ".author-header", ".author-profile", ".author-card",
@@ -198,7 +218,7 @@ function extractAuthors(context: PageContext): AuthorCandidate[] {
    : metaAuthor.value.split(/\s*(?:,|\|| and )\s*/i);
   for (const part of parts) {
    const raw = text(part);
-   if (!raw) continue;
+   if (!raw || isJobTitle(raw)) continue;
    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(raw) && httpUrl(raw, context.baseUrl)) continue;
    const name = personName(raw);
    if (!name) continue;
@@ -255,13 +275,30 @@ function authorsFromScope(scope: ParserElement, context: PageContext, currentUrl
  const label = nameElement?.querySelector(".author__title-desc");
  const nameSource = nameElement?.getAttribute("content") ?? (label && text(label.textContent) === "Author"
   ? (nameElement?.textContent ?? "").replace(label.textContent ?? "", " ")
-  : nameElement?.textContent) ?? (plainByline ? scope.textContent : scope.hasAttribute("data-author") ? scope.getAttribute("data-author") : undefined);
- const name = personName(nameSource);
- if (!name) return [];
+  : nameElement ? cleanBylineText(nameElement) : undefined) ?? (plainByline ? cleanBylineText(scope) : scope.hasAttribute("data-author") ? scope.getAttribute("data-author") : undefined);
  const explicitByline = !!scope.closest("[role='author'], [itemprop='author'], .byline, .entry-author, .c-entry-author") || scope.matches("[rel~='author'], [data-author], [data-testid*='author' i]");
  const inStoryCard = !!scope.closest(".related, .related-articles, .recommendations, [role='article']");
  const primary = !inStoryCard && (pageProfileScope || explicitByline);
  if (profilePath && !pageProfileScope && scope.closest("article, [role='article']")) return [];
+ const cleanRaw = text(nameSource)?.replace(/^(?:written\s+by|by)\s+/i, "").trim() ?? "";
+ const parts = cleanRaw.split(/\s*(?:,| and | & )\s*/i).map(text).filter((p): p is string => !!p && !isJobTitle(p));
+ if (parts.length > 1 && !pageProfileScope) {
+  const candidates: AuthorCandidate[] = [];
+  const validNames = parts.map(personName).filter((n): n is string => !!n);
+  if (validNames.length > 1) {
+   for (const validName of validNames) {
+    const p: AuthorCandidate["profile"] = { name: validName, socials: [] };
+    const evName = ev("dom-author", nameElement ? elementPath(nameElement) : elementPath(scope), primary ? "byline" : "profile", "high");
+    candidates.push({
+     profile: p, primary, evidence: { name: evName },
+     ...(authorshipGroup ? { authorshipGroups: [authorshipGroup] } : {}),
+    });
+   }
+   return candidates;
+  }
+ }
+ const name = personName(nameSource);
+ if (!name) return [];
  const profile: AuthorCandidate["profile"] = { name, socials: [] };
  const evidence: AuthorCandidate["evidence"] = { name: ev("dom-author", nameElement ? elementPath(nameElement) : elementPath(scope), pageProfileScope ? "profile" : primary ? "byline" : "profile", "high") };
  const nprBio = archivedBioScope ? nprSpeakableBio(scope, name) : undefined;
@@ -275,13 +312,19 @@ function authorsFromScope(scope: ParserElement, context: PageContext, currentUrl
  const roleEl = first(scope, ["[itemprop='jobTitle']", ".author-title", ".author-role", ".designation"]);
  const role = text(roleEl?.textContent);
  if (role && role.length <= MAX_ROLE) { profile.designation = role; evidence.designation = ev("dom-author", elementPath(roleEl!), "profile", "medium"); }
+ const authorEmails: string[] = [];
  for (const anchor of scope.querySelectorAll("a[href^='mailto:']")) {
   if (isExcludedAttributionScope(anchor)) continue;
   const email = emailAddress(anchor.getAttribute("href"));
   if (!email) continue;
-  profile.email = email;
-  evidence.email = ev("dom-author", elementPath(anchor), pageProfileScope ? "profile" : primary ? "byline" : "profile", "medium");
-  break;
+  if (!authorEmails.includes(email)) authorEmails.push(email);
+  if (!profile.email) {
+   profile.email = email;
+   evidence.email = ev("dom-author", elementPath(anchor), pageProfileScope ? "profile" : primary ? "byline" : "profile", "medium");
+  }
+ }
+ if (authorEmails.length) {
+  profile.emails = authorEmails;
  }
  const socialEvidence: ValueEvidence[] = [];
  const seen = new Set<string>();
@@ -328,7 +371,11 @@ function linkedAnchorCandidates(elements: ParserElement[], context: PageContext,
 function unmarkedLinkedBylines(doc: Document, context: PageContext, currentUrls: ReadonlySet<string>): AuthorCandidate[] {
  const candidates: AuthorCandidate[] = [];
  for (const paragraph of doc.querySelectorAll("p")) {
-  if (!/^(?:by|written by)\b/i.test(text(paragraph.textContent) ?? "")) continue;
+  const paragraphText = text(paragraph.textContent) ?? "";
+  if (paragraphText.length > 120) continue;
+  const hasAuthorClass = /\b(?:byline|author|contributor)\b/i.test(paragraph.className || "");
+  const startsWithByline = /^(?:[Bb]y|[Ww]ritten\s+[Bb]y)\s+[A-Z]/.test(paragraphText);
+  if (!hasAuthorClass && !startsWithByline) continue;
   for (const anchor of paragraph.querySelectorAll("a[href]")) {
    if (isExcludedAttributionScope(anchor) ||
     anchor.closest(".related, .related-articles, .recommendations, .comments, .comment, [itemprop='comment']")) continue;
@@ -391,10 +438,10 @@ function extractArticles(context: PageContext): ArticleCandidate[] {
   const url = href ? httpUrl(href, context.baseUrl) : undefined;
   const key = url ? normalizeArticleUrl(url) : "";
   if (href && url && key && !seenLinks.has(key) && !currentUrls.has(key) && !isAuthorProfileUrl(url) && isArticleAnchor(anchor) && !isNonArticleContext(anchor)) {
-   const headline = anchor.querySelector("h2, h3, h4, [data-testid*='headline' i]") ?? anchor.closest("h2, h3, h4, [data-testid*='headline' i]");
+   const headline = anchor.querySelector(HEADLINE_SELECTOR) ?? anchor.closest(HEADLINE_SELECTOR);
    const titleElement = headline ?? anchor;
    const title = text(titleElement.textContent) ?? text(anchor.getAttribute("aria-label")) ?? text(anchor.getAttribute("title"));
-   if (title && title.length >= 15 && title.length <= MAX_ARTICLE_TITLE) {
+   if (title && title.length >= 4 && title.length <= MAX_ARTICLE_TITLE) {
     seenLinks.add(key);
     const card = anchor.closest("article, [role='article']");
     const dateElement = card?.querySelector("time[datetime]");
@@ -426,10 +473,10 @@ function isProfileArticleWrapper(element: ParserElement): boolean {
 }
 
 function isArticleAnchor(anchor: ParserElement): boolean {
- if (anchor.matches("[data-testid*='headline' i]") || anchor.querySelector("h2, h3, h4, [data-testid*='headline' i]")) return true;
+ if (anchor.matches(HEADLINE_SELECTOR) || anchor.querySelector(HEADLINE_SELECTOR)) return true;
  if (/(?:^|\s)(?:c-entry-box--compact__title|tout-title-link)(?:\s|$)/.test(anchor.getAttribute("class") ?? "")) return true;
  for (let parent = anchor.parentElement; parent; parent = parent.parentElement) {
-  if (/^h[234]$/.test(parent.localName) || parent.matches("[data-testid*='headline' i]")) return true;
+  if (/^h[1-6]$/.test(parent.localName) || parent.matches(HEADLINE_SELECTOR)) return true;
   if (/(?:^|\s)(?:feed-item|river-item)(?:\s|$)/.test(parent.getAttribute("class") ?? "") && !isProfileArticleWrapper(parent)) return true;
   if (parent.localName === "body" || parent.localName === "html") break;
  }

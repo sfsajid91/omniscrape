@@ -164,10 +164,17 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
     if (sameIdentity(anchor, candidate) && (!candidate.profile.name || sameName(anchor.profile.name, candidate.profile.name))) {
       matching.push(candidate);
     } else if (!candidate.identity && sameName(anchor.profile.name, candidate.profile.name)) {
-      const hasNonNameAttributes = AUTHOR_FIELDS.some((field) => field !== "name" && candidate.profile[field] !== undefined)
-        || (candidate.profile.socials?.length ?? 0) > 0;
-      if (!hasNonNameAttributes && candidate.evidence.name) {
-        provenance.push(provenanceItem(context, `${fieldPrefix}.name`, candidate.profile.name!, candidate.evidence.name));
+      const scope = candidate.evidence.name?.scope;
+      if (scope === "byline" || scope === "profile") {
+        matching.push(candidate);
+      } else {
+        const hasNonNameAttributes = AUTHOR_FIELDS.some((field) => field !== "name" && candidate.profile[field] !== undefined)
+          || (candidate.profile.socials?.length ?? 0) > 0;
+        if (!hasNonNameAttributes && candidate.evidence.name) {
+          provenance.push(provenanceItem(context, `${fieldPrefix}.name`, candidate.profile.name!, candidate.evidence.name));
+        } else {
+          addReview(candidate, "different_identity");
+        }
       }
     } else {
       addReview(candidate, "different_identity");
@@ -176,7 +183,12 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
   const author: AuthorProfile = { name: anchor.profile.name!, socials: [] };
   const values = new Map<string, string | number>();
   const conflicting = new Set<string>();
+  const allEmails = new Set<string>();
   for (const candidate of matching) {
+    if (candidate.profile.email) allEmails.add(candidate.profile.email);
+    if (Array.isArray(candidate.profile.emails)) {
+      for (const e of candidate.profile.emails) if (e) allEmails.add(e);
+    }
     for (const field of AUTHOR_FIELDS) {
       const value = candidate.profile[field];
       if (value === undefined || !candidate.evidence[field]) continue;
@@ -191,6 +203,12 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
     if (field === "id") author.id = value;
     else author[field] = String(value);
   }
+  if (allEmails.size > 0) {
+    author.emails = Array.from(allEmails);
+    if (!conflicting.has("email") && !author.email) {
+      author.email = author.emails[0];
+    }
+  }
   if (conflicting.has("name")) author.name = "Unknown Author";
   const seenSocials = new Set<string>();
   for (const candidate of matching) {
@@ -200,6 +218,12 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
     for (const item of candidateProvenance(context, candidate, fieldPrefix)) {
       const field = item.field.slice(fieldPrefix.length + 1);
       if (field !== "socials" && !conflicting.has(field)) provenance.push(item);
+    }
+    if (Array.isArray(candidate.profile.emails)) {
+      for (const email of candidate.profile.emails) {
+        const evidence = candidate.evidence.email ?? candidate.evidence.name;
+        if (evidence) provenance.push(provenanceItem(context, `${fieldPrefix}.emails`, email, evidence, candidate.identity));
+      }
     }
     for (const [index, social] of (candidate.profile.socials ?? []).entries()) {
       if (!social.isPersonal) continue;
@@ -320,6 +344,24 @@ function resolveArticles(context: PageContext, sources: ExtractedData[], provena
   return articles;
 }
 
+function isDateConcordant(a: string, b: string): boolean {
+  if (a === b) return true;
+  const timeA = Date.parse(a);
+  const timeB = Date.parse(b);
+  if (isNaN(timeA) || isNaN(timeB)) return false;
+  const dateA = a.slice(0, 10);
+  const dateB = b.slice(0, 10);
+  if (dateA !== dateB) return false;
+  return Math.abs(timeA - timeB) <= 60000;
+}
+
+function sourcePriority(source: string): number {
+  if (source.startsWith("json-ld")) return 3;
+  if (source.startsWith("hydration")) return 2;
+  if (source.startsWith("dom:meta")) return 1;
+  return 0;
+}
+
 function resolveFields(context: PageContext, sources: ExtractedData[], provenance: ProvenanceItem[]): { editorial: EditorialInfo; metadata: PageMetadata } {
   const editorial: EditorialInfo = {};
   const metadata: PageMetadata = {};
@@ -329,17 +371,34 @@ function resolveFields(context: PageContext, sources: ExtractedData[], provenanc
     ? allFields.filter((item) => item.field !== "metadata.publishedTime" || item.evidence.confidence !== "low")
     : allFields;
   const conflicts = new Set<string>();
-  const values = new Map<string, string | number>();
-  for (const { field, value } of fields) {
-    if (values.has(field) && values.get(field) !== value) conflicts.add(field);
-    else values.set(field, value);
+  const values = new Map<string, { value: string | number; priority: number }>();
+  for (const { field, value, evidence } of fields) {
+    const priority = sourcePriority(evidence.source);
+    if (values.has(field)) {
+      const existing = values.get(field)!;
+      if (existing.value !== value) {
+        if ((field === "metadata.publishedTime" || field === "metadata.modifiedTime") &&
+            typeof existing.value === "string" && typeof value === "string" &&
+            isDateConcordant(existing.value, value)) {
+          if (priority > existing.priority) {
+            values.set(field, { value, priority });
+          }
+        } else {
+          conflicts.add(field);
+        }
+      }
+    } else {
+      values.set(field, { value, priority });
+    }
   }
   for (const field of conflicts) context.issues.push({ sourcePath: field, message: `Conflicting values for ${field}; left missing` });
-  for (const { field, value, evidence } of fields) {
+  for (const [field, entry] of values) {
     if (conflicts.has(field)) continue;
+    const value = entry.value;
     switch (field) {
       case "editorial.ownerName": editorial.ownerName = String(value); break;
       case "editorial.ownerId": editorial.ownerId = value; break;
+      case "editorial.ownerEmail": editorial.ownerEmail = String(value); break;
       case "editorial.assigneeName": editorial.assigneeName = String(value); break;
       case "editorial.assigneeId": editorial.assigneeId = value; break;
       case "editorial.publisher": editorial.publisher = String(value); break;
@@ -352,7 +411,14 @@ function resolveFields(context: PageContext, sources: ExtractedData[], provenanc
       case "metadata.modifiedTime": metadata.modifiedTime = String(value); break;
       default: continue;
     }
-    provenance.push(provenanceItem(context, field, value, evidence));
+  }
+  for (const { field, value, evidence } of fields) {
+    if (conflicts.has(field)) continue;
+    const accepted = values.get(field);
+    if (!accepted) continue;
+    if (accepted.value === value || ((field === "metadata.publishedTime" || field === "metadata.modifiedTime") && typeof accepted.value === "string" && typeof value === "string" && isDateConcordant(accepted.value, value))) {
+      provenance.push(provenanceItem(context, field, value, evidence));
+    }
   }
   return { editorial, metadata };
 }

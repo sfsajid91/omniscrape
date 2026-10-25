@@ -202,7 +202,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     if (!isRelatedPerson(fragment.value) || emitted.has(fragment.path)) continue;
     const key = entityKey(fragment.value, fragment.path, context);
     const rootProfile = personIdentityKeys.size === 1 && rootPaths.has(fragment.path) && (!fragment.value.url || personMatchesPage(fragment.value, context));
-    const pageBound = !isAuthorProfileUrl(context.pageUrl) && personMatchesPage(fragment.value, context);
+    const pageBound = primaryPersonKeys.size === 0 && !isAuthorProfileUrl(context.pageUrl) && personMatchesPage(fragment.value, context);
     const primary = primaryPersonKeys.has(key) || rootProfile || pageBound;
     const scope = primaryPersonScopes.get(key) ?? (pageBound ? "profile" : "page");
     const candidate = personCandidate(fragment.value, fragment.path, context, primary, scope, fragment.fieldPaths);

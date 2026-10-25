@@ -233,3 +233,22 @@ describe("parser resource boundaries", () => {
     expect(result.rawHydration).toBeUndefined();
   });
 });
+
+describe("parser invocation overloads and input validation", () => {
+  test("accepts ParseHtmlInput object overload with limits", () => {
+    const result = parseHtml({
+      html: "<html><head><title>Test Title</title></head><body><h1>Author</h1></body></html>",
+      pageUrl: "https://example.com/story",
+      maxHtmlBytes: 1024 * 1024,
+      includeRawHydration: false,
+    });
+    expect(result.url).toBe("https://example.com/story");
+    expect(result.metadata.title).toBe("Test Title");
+  });
+
+  test("throws TypeError for invalid argument types in overloads", () => {
+    expect(() => parseHtml(123 as any, "https://example.com")).toThrow(TypeError);
+    expect(() => parseHtml({ html: 123 as any, pageUrl: "https://example.com" })).toThrow(TypeError);
+    expect(() => parseHtml({ html: "<h1>Test</h1>", pageUrl: 123 as any })).toThrow(TypeError);
+  });
+});

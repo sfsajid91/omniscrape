@@ -15,6 +15,9 @@ export const SocialPlatformSchema = z.enum([
   "github",
   "threads",
   "bluesky",
+  "substack",
+  "medium",
+  "mastodon",
   "other",
 ]);
 export type SocialPlatform = z.infer<typeof SocialPlatformSchema>;
@@ -44,6 +47,7 @@ export const AuthorProfileSchema = z.object({
   bio: z.string().optional(),
   avatarUrl: HttpUrlSchema.optional(),
   email: z.string().email().optional(),
+  emails: z.array(z.string().email()).optional(),
   socials: z.array(SocialLinkSchema).default([]),
 });
 export type AuthorProfile = z.infer<typeof AuthorProfileSchema>;
@@ -51,6 +55,7 @@ export type AuthorProfile = z.infer<typeof AuthorProfileSchema>;
 export const EditorialInfoSchema = z.object({
   ownerName: z.string().optional(),
   ownerId: z.union([z.string(), z.number()]).optional(),
+  ownerEmail: z.string().email().optional(),
   assigneeName: z.string().optional(),
   assigneeId: z.union([z.string(), z.number()]).optional(),
   publisher: z.string().optional(),

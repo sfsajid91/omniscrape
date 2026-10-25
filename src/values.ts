@@ -24,14 +24,16 @@ export function personName(value: unknown): string | undefined {
 }
 export function isAuthorProfileUrl(value: string): boolean {
  try {
-  const parts = new URL(value).pathname.split("/").filter(Boolean);
+  const pathname = new URL(value).pathname.replace(/\/page\/\d+\/?$/i, "/");
+  const parts = pathname.split("/").filter(Boolean);
   const last = parts.at(-1)?.toLowerCase();
   const parent = parts.at(-2)?.toLowerCase();
+  if (parts.length === 1 && parts[0]?.startsWith("@")) return true;
   if (parent === "profile") return parts.length === 2 && !!last && !/^(?:edit|settings|login|signup|search)$/i.test(last);
   if (parts[0]?.toLowerCase() === "people" && parts.length === 3 && /^\d+$/.test(parts[1]!) && !!last) {
    return !/^(?:edit|settings|login|signup|search)$/i.test(last);
   }
-  return parts.length > 1 && /^(?:author|authors|contributor|contributors|staff|people)$/i.test(parent ?? "");
+  return parts.length > 1 && /^(?:author|authors|contributor|contributors|staff|people|writer|writers|team|reporters?|by)$/i.test(parent ?? "");
  } catch {
   return false;
  }
@@ -102,12 +104,14 @@ export function imageUrl(value: unknown, baseUrl: string): string | undefined {
 }
 
 export function emailAddress(value: unknown): string | undefined {
- const raw = text(value)?.replace(/^mailto:/i, "").split("?")[0];
- if (!raw) return undefined;
+ const str = text(value)?.replace(/^mailto:/i, "").split("?")[0];
+ if (!str) return undefined;
+ const match = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.exec(str);
+ const raw = match ? match[0] : str;
  let email: string;
  try { email = decodeURIComponent(raw).trim().toLowerCase(); } catch { return undefined; }
  if (!EmailSchema.safeParse(email).success) return undefined;
- if (/^(?:pitches|feedback|corrections|tips|press|contact|info|support|advertising|subscriptions|privacy|help|news|newsroom|desk|editorial)@/i.test(email)) return undefined;
+ if (/^(?:pitches|feedback|corrections|press|contact|info|support|advertising|subscriptions|privacy|help|news|newsroom|desk|editorial)@/i.test(email)) return undefined;
  return email;
 }
 
@@ -122,7 +126,7 @@ export function socialLink(value: unknown, baseUrl: string): SocialLink | undefi
  let platform: SocialLink["platform"];
  let personal = true;
  let handle: string | undefined;
- if (host === "linkedin.com") {
+ if (host === "linkedin.com" || /^[a-z]{2}\.linkedin\.com$/.test(host)) {
   platform = "linkedin";
   if (!["in", "company"].includes(first) || !parts[1] || parts.length !== 2) return undefined;
   personal = first === "in";
@@ -158,24 +162,56 @@ export function socialLink(value: unknown, baseUrl: string): SocialLink | undefi
   handle = first.startsWith("@") ? parts[0].slice(1) : parts[1];
  } else if (host === "facebook.com") {
   platform = "facebook";
-  if (parts.length !== 1 || /^(?:sharer|sharer.php|share.php|dialog|plugins|login|watch)$/i.test(first)) return undefined;
-  handle = parts[0];
+  if (first === "profile.php") {
+   const id = url.searchParams.get("id");
+   if (!id || !/^\d+$/.test(id)) return undefined;
+   handle = id;
+   url.search = `?id=${id}`;
+  } else {
+   if (parts.length !== 1 || /^(?:sharer|sharer.php|share.php|dialog|plugins|login|watch)$/i.test(first)) return undefined;
+   handle = parts[0];
+   url.search = "";
+  }
+ } else if (host === "substack.com" || host.endsWith(".substack.com")) {
+  platform = "substack";
+  if (host.endsWith(".substack.com") && host !== "substack.com") {
+   handle = host.slice(0, -".substack.com".length);
+  } else if (parts.length === 1 && first.startsWith("@")) {
+   handle = parts[0].slice(1);
+  } else return undefined;
+ } else if (host === "medium.com" || host.endsWith(".medium.com")) {
+  platform = "medium";
+  if (host.endsWith(".medium.com") && host !== "medium.com") {
+   handle = host.slice(0, -".medium.com".length);
+  } else if (parts.length === 1 && first.startsWith("@")) {
+   handle = parts[0].slice(1);
+  } else return undefined;
  } else return undefined;
  url.hash = "";
- url.search = "";
+ if (platform !== "facebook" || first !== "profile.php") {
+  url.search = "";
+ }
  url.pathname = url.pathname.replace(/\/+$/, "");
  return { platform, url: url.href, isPersonal: personal, ...(handle ? { handle } : {}) };
 }
-
-
 
 const CHARACTER_REFERENCE = /&(?:#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/i;
 
 export function decodeEntities(value: string): string {
  if (!CHARACTER_REFERENCE.test(value)) return value;
- const escaped = value.replace(/</g, "&lt;");
- const { document } = parseHTML(`<span>${escaped}</span>`);
- return document.querySelector("span")?.textContent ?? value;
+ return value.replace(/&(#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+  if (entity.startsWith("#x") || entity.startsWith("#X")) {
+   const cp = parseInt(entity.slice(2), 16);
+   return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : match;
+  }
+  if (entity.startsWith("#")) {
+   const cp = parseInt(entity.slice(1), 10);
+   return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : match;
+  }
+  const escaped = match.replace(/</g, "&lt;");
+  const { document } = parseHTML(`<span>${escaped}</span>`);
+  return document.querySelector("span")?.textContent ?? match;
+ });
 }
 
 export function stripHtml(value: unknown): string | undefined {

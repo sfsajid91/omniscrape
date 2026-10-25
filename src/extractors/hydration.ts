@@ -33,6 +33,7 @@ export function extractHydrationData(context: PageContext): HydrationResult {
  const addQuintype = (value: unknown, path: string, sourceName: string) => {
   const root = quintypeRoot(value, path);
   add(root.value, root.path, sourceName);
+  correlateQuintypeCollectionEntities(root.value, root.path, sourceName, context, result);
  };
  const parseScript = (script: { text: string; path: string; type?: string }): ScriptParseResult => {
   const previous = scriptParseResults.get(script.path);
@@ -164,6 +165,7 @@ function collect(root: unknown, rootPath: string, source: string, context: PageC
  type Walk = { value: unknown; path: string; parentKey?: string; depth: number; blocked: boolean; inStory: boolean; inCollection: boolean; nonPrimary: boolean };
  const stack: Walk[] = [{ value: root, path: rootPath, depth: 0, blocked: false, inStory: false, inCollection: false, nonPrimary: false }];
  const seen = new WeakMap<object, Set<number>>();
+ const seenEditorial = new Set<string>();
  const isQuintype = source.toLowerCase().includes("quintype");
  const blockedKeys = new Set(["user", "currentUser", "loggedInUser", "session", "viewer"]);
  const collectionKeys = new Set(["authorCollection", "blog", "linked-story", "linked-stories", "linkedStory", "linkedStories", "mostPopularArticles", "most-popular-articles"]);
@@ -238,7 +240,7 @@ function collect(root: unknown, rootPath: string, source: string, context: PageC
    const candidate = authorCandidate(candidateObj, path, source, context, primary || (profileResourceTarget && !nonPrimary), scope);
    if (candidate) pushAuthorCandidate(currentRelation ? { ...candidate, authorshipGroups: [hydrationAuthorshipGroup(source, path, parentKey)] } : candidate, candidateObj, path, source, context, out);
   }
-  collectEditorial(obj, path, source, out);
+  collectEditorial(obj, path, source, out, seenEditorial);
   const isQuintypeCollection = isQuintype && obj.type === "collection";
   if (isQuintypeCollection) addArticles(obj, path, source, context, out);
   for (const [key, child] of Object.entries(obj)) {
@@ -468,14 +470,116 @@ function addArticles(value: unknown, path: string, source: string, context: Page
   out.articles.push({ article, evidence, fieldPaths: { title: `${itemPath}.${titleKey}`, url: `${itemPath}.${routeKey}`, ...(date && dateKey ? { publishedAt: `${itemPath}.${dateKey}` } : {}) } });
  }
 }
-function collectEditorial(obj: Record<string, unknown>, path: string, source: string, out: ExtractedData): void {
+function collectEditorial(obj: Record<string, unknown>, path: string, source: string, out: ExtractedData, seenEditorial: Set<string>): void {
  for (const [key, field] of [["owner-name", "editorial.ownerName"], ["ownerName", "editorial.ownerName"], ["owner-id", "editorial.ownerId"], ["ownerId", "editorial.ownerId"], ["assignee-name", "editorial.assigneeName"], ["assigneeName", "editorial.assigneeName"], ["assignee-id", "editorial.assigneeId"], ["assigneeId", "editorial.assigneeId"], ["publisher", "editorial.publisher"], ["publisher-name", "editorial.publisher"]] as const) {
   const value = /(?:-id|Id)$/.test(key) ? (typeof obj[key] === "number" && Number.isFinite(obj[key]) ? obj[key] : text(obj[key])) : text(obj[key]);
-  if (value !== undefined && value !== "") addField(out, field, value, source, `${path}.${key}`, "publisher");
+  if (value !== undefined && value !== "") {
+   const tupleKey = `${field}:${value}`;
+   if (seenEditorial.has(tupleKey)) continue;
+   seenEditorial.add(tupleKey);
+   addField(out, field, value, source, `${path}.${key}`, "publisher");
+  }
  }
 }
 function addField(out: ExtractedData, field: string, value: string | number, source: string, sourcePath: string, scope: ValueEvidence["scope"]): void {
  out.fields.push({ field, value, evidence: { source: `hydration:${source}`, sourcePath, scope, confidence: "medium" } });
+}
+
+function correlateQuintypeCollectionEntities(
+ root: unknown,
+ rootPath: string,
+ sourceName: string,
+ context: PageContext,
+ out: ExtractedData,
+): void {
+ if (!isRecord(root)) return;
+ const authorObj = isRecord(root.author) ? root.author : undefined;
+ const authorId = authorObj ? authorObj.id : undefined;
+ const authorName = authorObj ? personName(authorObj.name ?? authorObj["author-name"]) : undefined;
+
+ const collection = isRecord(root.authorCollection)
+  ? root.authorCollection
+  : isRecord(root.collection)
+  ? root.collection
+  : undefined;
+ if (!collection || !Array.isArray(collection.items)) return;
+
+ const seenAuthorEmails = new Set<string>();
+ const seenOwnerEmails = new Set<string>();
+
+ for (const [itemIndex, item] of collection.items.entries()) {
+  if (!isRecord(item)) continue;
+  const story = isRecord(item.story) ? item.story : undefined;
+  if (!story) continue;
+  const ownerId = story["owner-id"] ?? story.ownerId;
+  const itemPath = `${rootPath}.authorCollection.items[${itemIndex}].story`;
+
+  const candidatesToCheck: Array<{ author: Record<string, unknown>; path: string }> = [];
+
+  if (Array.isArray(story.authors)) {
+   for (const [aIdx, a] of story.authors.entries()) {
+    if (isRecord(a)) candidatesToCheck.push({ author: a, path: `${itemPath}.authors[${aIdx}]` });
+   }
+  }
+
+  if (Array.isArray(story.cards)) {
+   for (const [cIdx, card] of story.cards.entries()) {
+    if (!isRecord(card) || !Array.isArray(card["story-elements"])) continue;
+    for (const [eIdx, el] of card["story-elements"].entries()) {
+     if (!isRecord(el) || !isRecord(el.metadata)) continue;
+     const linkedStory = el.metadata["linked-story"];
+     if (isRecord(linkedStory) && Array.isArray(linkedStory.authors)) {
+      for (const [laIdx, la] of linkedStory.authors.entries()) {
+       if (isRecord(la)) {
+        candidatesToCheck.push({
+         author: la,
+         path: `${itemPath}.cards[${cIdx}].story-elements[${eIdx}].metadata.linked-story.authors[${laIdx}]`,
+        });
+       }
+      }
+     }
+    }
+   }
+  }
+
+  for (const { author: cand, path: candPath } of candidatesToCheck) {
+   const email = emailAddress(cand.email);
+   if (!email) continue;
+   const cId = cand.id;
+
+   if (authorId !== undefined && cId !== undefined && String(cId) === String(authorId)) {
+    if (!seenAuthorEmails.has(email)) {
+     seenAuthorEmails.add(email);
+     const name = personName(cand.name) ?? authorName;
+     if (name) {
+      out.authors.push({
+       identity: `${sourceName}@${publisherNamespace(context)}:${cId}`,
+       primary: true,
+       profile: {
+        name,
+        id: typeof cId === "number" ? cId : String(cId),
+        email,
+        emails: [email],
+        socials: [],
+       },
+       evidence: {
+        name: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.name`, scope: "profile", confidence: "high" },
+        email: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.email`, scope: "profile", confidence: "high" },
+        id: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.id`, scope: "profile", confidence: "high" },
+       },
+      });
+     }
+    }
+   }
+
+   if (ownerId !== undefined && cId !== undefined && String(cId) === String(ownerId)) {
+    if (!seenOwnerEmails.has(email)) {
+     seenOwnerEmails.add(email);
+     addField(out, "editorial.ownerEmail", email, sourceName, `${candPath}.email`, "publisher");
+    }
+   }
+  }
+ }
 }
 
 function decodeNuxt3(serialized: string, context: PageContext, path: string): unknown {
@@ -617,20 +721,38 @@ function parseFlightRecords(
  });
  const stream = chunks.map((chunk) => chunk.text).join("");
  let lineOffset = 0;
+ let currentId: string | undefined;
+ let currentPayload = "";
+ let currentSourcePath = "script";
+
+ const flushRecord = () => {
+  if (currentId && currentPayload) {
+   if (records.length >= context.limits.maxDecodeNodes) {
+    context.issues.push({ sourcePath: currentSourcePath, message: "Flight record limit exceeded" });
+    return;
+   }
+   try { records.push({ id: currentId, value: JSON.parse(currentPayload), path: `${currentSourcePath}#flight:${currentId}` }); }
+   catch { /* text/model records are intentionally ignored */ }
+  }
+  currentId = undefined;
+  currentPayload = "";
+ };
+
  for (const line of stream.split("\n")) {
   const row = line.endsWith("\r") ? line.slice(0, -1) : line;
   const match = /^([0-9a-f]+):(.*)$/i.exec(row);
   const sourcePath = ranges.find((range) => lineOffset >= range.start && lineOffset < range.end)?.path ?? "script";
-  if (match && match[2]) {
-   if (records.length >= context.limits.maxDecodeNodes) {
-    context.issues.push({ sourcePath, message: "Flight record limit exceeded" });
-    break;
-   }
-   try { records.push({ id: match[1], value: JSON.parse(match[2]), path: `${sourcePath}#flight:${match[1]}` }); }
-   catch { /* text/model records are intentionally ignored */ }
+  if (match) {
+   flushRecord();
+   currentId = match[1];
+   currentPayload = match[2];
+   currentSourcePath = sourcePath;
+  } else if (currentId !== undefined && row.length > 0) {
+   currentPayload += "\\n" + row;
   }
   lineOffset += line.length + 1;
  }
+ flushRecord();
 
  const recordsById = new Map(records.map((record) => [record.id, record]));
  const referenced = new Set<string>();

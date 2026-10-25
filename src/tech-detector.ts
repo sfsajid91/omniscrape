@@ -26,10 +26,10 @@ export function detectTechStack(context: PageContext): TechStack {
     framework = "Nuxt 2";
     hydrationFormat = "window.__NUXT__";
     signals.push("found Nuxt SSR markers");
-  } else if (html.includes("<astro-island") || html.includes("astro-")) {
+  } else if (html.includes("<astro-island") || html.includes("data-astro-") || html.includes("/_astro/")) {
     framework = "Astro";
     signals.push("found Astro markers");
-  } else if (html.includes("__sveltekit") || html.includes("svelte-")) {
+  } else if (html.includes("__sveltekit") || html.includes("data-sveltekit-") || html.includes("/_app/immutable/")) {
     framework = "SvelteKit";
     signals.push("found SvelteKit markers");
   }
