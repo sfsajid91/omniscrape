@@ -25,24 +25,51 @@ function isJobTitle(value: string): boolean {
  return EDITORIAL_JOB_TITLES.has(value.trim().toLowerCase());
 }
 
-function cleanBylineText(element: ParserElement): string {
- const clone = element.cloneNode(true) as ParserElement;
- for (const unwanted of clone.querySelectorAll('a[href^="mailto:"], button, svg, time, .email, [data-email], .author__title-desc')) {
-  unwanted.remove();
- }
- return clone.textContent ?? "";
+function isUnwantedBylineElement(element: ParserElement): boolean {
+ const tag = element.localName;
+ if (tag === "button" || tag === "svg" || tag === "time") return true;
+ if (tag === "a" && (element.getAttribute("href") ?? "").toLowerCase().startsWith("mailto:")) return true;
+ if (element.hasAttribute("data-email")) return true;
+ const className = element.getAttribute("class") ?? "";
+ if (/(?:^|\s)(?:email|author__title-desc)(?:\s|$)/.test(className)) return true;
+ return false;
 }
+
+function collectCleanText(node: Node, parts: string[]): void {
+ if (node.nodeType === 3 /* TEXT_NODE */) {
+  if (node.nodeValue) parts.push(node.nodeValue);
+  return;
+ }
+ if (node.nodeType === 1 /* ELEMENT_NODE */) {
+  if (isUnwantedBylineElement(node as ParserElement)) return;
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+   collectCleanText(child, parts);
+  }
+ }
+}
+
+function cleanBylineText(element: ParserElement): string {
+ const parts: string[] = [];
+ for (let child = element.firstChild; child; child = child.nextSibling) {
+  collectCleanText(child, parts);
+ }
+ return parts.join("");
+}
+
 const AUTHOR_SCOPE = [
  "[role='author']", "[itemtype*='Person' i]", "[itemprop='author']", "[rel~='author']",
  ".byline", ".entry-author", ".c-entry-author", ".author-header", ".author-profile", ".author-card",
  ".article-author", ".author-detail", "header[class*='author-page']", "header.contentheader--archived-bio", "[class*='author-name']",
  "[data-testid*='author' i]", "[data-author]",
 ];
+const AUTHOR_SCOPE_SELECTOR = AUTHOR_SCOPE.join(", ");
+
 const NAME_SELECTORS = [
  "[itemprop='name']", "[itemprop='author'] [itemprop='name']", ".author-name", ".contributor-name", "[rel~='author']",
  "a[href*='/author/']", "a[href*='/authors/']", "a[href*='/contributors/']",
  "[class*='author-name']", "[data-author]",
 ];
+const NAME_SELECTORS_JOINED = NAME_SELECTORS.join(", ");
 
 export function extractDomAndMeta(context: PageContext): DomMetaResult {
  const { metadata, fields } = extractPageMetadata(context);
@@ -208,7 +235,7 @@ function nprSpeakableBio(scope: ParserElement, name: string): ParserElement | un
 function extractAuthors(context: PageContext): AuthorCandidate[] {
  const doc = context.document;
  const candidates: AuthorCandidate[] = [];
- const scopes = doc.querySelectorAll(AUTHOR_SCOPE.join(", "));
+ const scopes = doc.querySelectorAll(AUTHOR_SCOPE_SELECTOR);
  const currentUrls = currentArticleUrls(context);
 
  // Explicit author metadata is evidence for a byline, never an article title/description surrogate.
@@ -259,7 +286,7 @@ function authorsFromScope(scope: ParserElement, context: PageContext, currentUrl
   (scope.matches("[rel~='author'], [data-author], [data-testid*='author' i]") ? scope : null);
  const authorshipGroup = !profilePath && !scope.closest(".related, .related-articles, .recommendations, .comments, .comment, [itemprop='comment']") && bylineContainer
   ? `dom:${elementPath(bylineContainer)}` : undefined;
- const names = Array.from(scope.querySelectorAll(NAME_SELECTORS.join(", ")));
+ const names = Array.from(scope.querySelectorAll(NAME_SELECTORS_JOINED));
  const separateNames = names.filter((element) => !names.some((other) => other !== element && other.contains(element)));
  if (separateNames.length > 1) return linkedAnchorCandidates(separateNames, context, currentUrls, authorshipGroup);
  const archivedBioScope = scope.matches("header.contentheader--archived-bio") && profilePath;

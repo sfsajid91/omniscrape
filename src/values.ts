@@ -115,84 +115,137 @@ export function emailAddress(value: unknown): string | undefined {
  return email;
 }
 
+interface SocialMatch {
+  platform: SocialLink["platform"];
+  isPersonal?: boolean;
+  handle?: string;
+  customSearch?: string;
+}
+
+interface SocialPlatformStrategy {
+  matches(host: string): boolean;
+  parse(url: URL, host: string, parts: string[], first: string): SocialMatch | undefined;
+}
+
+const SOCIAL_STRATEGIES: readonly SocialPlatformStrategy[] = [
+  {
+    matches: (host) => host === "linkedin.com" || /^[a-z]{2}\.linkedin\.com$/.test(host),
+    parse: (_url, _host, parts, first) => {
+      if (!["in", "company"].includes(first) || !parts[1] || parts.length !== 2) return undefined;
+      return { platform: "linkedin", isPersonal: first === "in", handle: parts[1] };
+    },
+  },
+  {
+    matches: (host) => host === "twitter.com" || host === "x.com",
+    parse: (_url, _host, parts, first) => {
+      if (parts.length !== 1 || /^(?:intent|share|search|home|i|login|signup|settings|explore|messages|notifications)$/i.test(first)) return undefined;
+      return { platform: "twitter", handle: parts[0] };
+    },
+  },
+  {
+    matches: (host) => host === "instagram.com",
+    parse: (_url, _host, parts, first) => {
+      if (parts.length !== 1 || /^(?:p|reel|reels|stories|explore|accounts|direct|about|share)$/i.test(first)) return undefined;
+      return { platform: "instagram", handle: parts[0] };
+    },
+  },
+  {
+    matches: (host) => host === "muckrack.com",
+    parse: (_url, _host, parts, first) => {
+      if (parts.length !== 1 || /^(?:media-outlet|search|rankings|daily)$/i.test(first)) return undefined;
+      return { platform: "muckrack", handle: parts[0] };
+    },
+  },
+  {
+    matches: (host) => host === "threads.net" || host === "threads.com",
+    parse: (_url, _host, parts, first) => {
+      if (!first.startsWith("@") || parts.length !== 1) return undefined;
+      return { platform: "threads", handle: parts[0].slice(1) };
+    },
+  },
+  {
+    matches: (host) => host === "bsky.app",
+    parse: (_url, _host, parts, first) => {
+      if (first !== "profile" || !parts[1] || parts.length !== 2) return undefined;
+      return { platform: "bluesky", handle: parts[1] };
+    },
+  },
+  {
+    matches: (host) => host === "github.com",
+    parse: (_url, _host, parts, first) => {
+      if (parts.length !== 1 || /^(?:login|signup|features|topics|explore|settings)$/i.test(first)) return undefined;
+      return { platform: "github", handle: parts[0] };
+    },
+  },
+  {
+    matches: (host) => host === "youtube.com",
+    parse: (_url, _host, parts, first) => {
+      if (!first.startsWith("@") && !(["user", "c", "channel"].includes(first) && parts[1])) return undefined;
+      return { platform: "youtube", isPersonal: first !== "channel", handle: first.startsWith("@") ? parts[0].slice(1) : parts[1] };
+    },
+  },
+  {
+    matches: (host) => host === "facebook.com",
+    parse: (url, _host, parts, first) => {
+      if (first === "profile.php") {
+        const id = url.searchParams.get("id");
+        if (!id || !/^\d+$/.test(id)) return undefined;
+        return { platform: "facebook", handle: id, customSearch: `?id=${id}` };
+      }
+      if (parts.length !== 1 || /^(?:sharer|sharer.php|share.php|dialog|plugins|login|watch)$/i.test(first)) return undefined;
+      return { platform: "facebook", handle: parts[0] };
+    },
+  },
+  {
+    matches: (host) => host === "substack.com" || host.endsWith(".substack.com"),
+    parse: (_url, host, parts, first) => {
+      if (host.endsWith(".substack.com") && host !== "substack.com") {
+        return { platform: "substack", handle: host.slice(0, -".substack.com".length) };
+      }
+      if (parts.length === 1 && first.startsWith("@")) {
+        return { platform: "substack", handle: parts[0].slice(1) };
+      }
+      return undefined;
+    },
+  },
+  {
+    matches: (host) => host === "medium.com" || host.endsWith(".medium.com"),
+    parse: (_url, host, parts, first) => {
+      if (host.endsWith(".medium.com") && host !== "medium.com") {
+        return { platform: "medium", handle: host.slice(0, -".medium.com".length) };
+      }
+      if (parts.length === 1 && first.startsWith("@")) {
+        return { platform: "medium", handle: parts[0].slice(1) };
+      }
+      return undefined;
+    },
+  },
+];
+
 export function socialLink(value: unknown, baseUrl: string): SocialLink | undefined {
- const absolute = httpUrl(value, baseUrl);
- if (!absolute) return undefined;
- const url = new URL(absolute);
- const host = url.hostname.toLowerCase().replace(/^(?:www\.|mobile\.|m\.)/, "");
- const parts = url.pathname.split("/").filter(Boolean);
- const first = parts[0]?.toLowerCase();
- if (!first) return undefined;
- let platform: SocialLink["platform"];
- let personal = true;
- let handle: string | undefined;
- if (host === "linkedin.com" || /^[a-z]{2}\.linkedin\.com$/.test(host)) {
-  platform = "linkedin";
-  if (!["in", "company"].includes(first) || !parts[1] || parts.length !== 2) return undefined;
-  personal = first === "in";
-  handle = parts[1];
- } else if (host === "twitter.com" || host === "x.com") {
-  platform = "twitter";
-  if (parts.length !== 1 || /^(?:intent|share|search|home|i|login|signup|settings|explore|messages|notifications)$/i.test(first)) return undefined;
-  handle = parts[0];
- } else if (host === "instagram.com") {
-  platform = "instagram";
-  if (parts.length !== 1 || /^(?:p|reel|reels|stories|explore|accounts|direct|about|share)$/i.test(first)) return undefined;
-  handle = parts[0];
- } else if (host === "muckrack.com") {
-  platform = "muckrack";
-  if (parts.length !== 1 || /^(?:media-outlet|search|rankings|daily)$/i.test(first)) return undefined;
-  handle = parts[0];
- } else if (host === "threads.net" || host === "threads.com") {
-  platform = "threads";
-  if (!first.startsWith("@") || parts.length !== 1) return undefined;
-  handle = parts[0].slice(1);
- } else if (host === "bsky.app") {
-  platform = "bluesky";
-  if (first !== "profile" || !parts[1] || parts.length !== 2) return undefined;
-  handle = parts[1];
- } else if (host === "github.com") {
-  platform = "github";
-  if (parts.length !== 1 || /^(?:login|signup|features|topics|explore|settings)$/i.test(first)) return undefined;
-  handle = parts[0];
- } else if (host === "youtube.com") {
-  platform = "youtube";
-  if (!first.startsWith("@") && !(["user", "c", "channel"].includes(first) && parts[1])) return undefined;
-  personal = first !== "channel";
-  handle = first.startsWith("@") ? parts[0].slice(1) : parts[1];
- } else if (host === "facebook.com") {
-  platform = "facebook";
-  if (first === "profile.php") {
-   const id = url.searchParams.get("id");
-   if (!id || !/^\d+$/.test(id)) return undefined;
-   handle = id;
-   url.search = `?id=${id}`;
-  } else {
-   if (parts.length !== 1 || /^(?:sharer|sharer.php|share.php|dialog|plugins|login|watch)$/i.test(first)) return undefined;
-   handle = parts[0];
-   url.search = "";
+  const absolute = httpUrl(value, baseUrl);
+  if (!absolute) return undefined;
+  const url = new URL(absolute);
+  const host = url.hostname.toLowerCase().replace(/^(?:www\.|mobile\.|m\.)/, "");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const first = parts[0]?.toLowerCase();
+  if (!first) return undefined;
+
+  for (const strategy of SOCIAL_STRATEGIES) {
+    if (!strategy.matches(host)) continue;
+    const match = strategy.parse(url, host, parts, first);
+    if (!match) return undefined;
+    url.hash = "";
+    url.search = match.customSearch ?? "";
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    return {
+      platform: match.platform,
+      url: url.href,
+      isPersonal: match.isPersonal ?? true,
+      ...(match.handle ? { handle: match.handle } : {}),
+    };
   }
- } else if (host === "substack.com" || host.endsWith(".substack.com")) {
-  platform = "substack";
-  if (host.endsWith(".substack.com") && host !== "substack.com") {
-   handle = host.slice(0, -".substack.com".length);
-  } else if (parts.length === 1 && first.startsWith("@")) {
-   handle = parts[0].slice(1);
-  } else return undefined;
- } else if (host === "medium.com" || host.endsWith(".medium.com")) {
-  platform = "medium";
-  if (host.endsWith(".medium.com") && host !== "medium.com") {
-   handle = host.slice(0, -".medium.com".length);
-  } else if (parts.length === 1 && first.startsWith("@")) {
-   handle = parts[0].slice(1);
-  } else return undefined;
- } else return undefined;
- url.hash = "";
- if (platform !== "facebook" || first !== "profile.php") {
-  url.search = "";
- }
- url.pathname = url.pathname.replace(/\/+$/, "");
- return { platform, url: url.href, isPersonal: personal, ...(handle ? { handle } : {}) };
+  return undefined;
 }
 
 const CHARACTER_REFERENCE = /&(?:#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/i;

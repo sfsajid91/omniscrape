@@ -257,6 +257,22 @@ function uniqueAuthorshipMembers(candidates: AuthorCandidate[]): AuthorCandidate
   });
 }
 
+function sortedStringsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function mapCountsEqual(a: Map<string, number>, b: Map<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, count] of a) {
+    if (b.get(key) !== count) return false;
+  }
+  return true;
+}
+
 function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): boolean {
   const identitySet = (members: AuthorCandidate[]) => members.map(membershipIdentity).filter((value): value is string => !!value).sort();
   const nameCounts = (members: AuthorCandidate[]) => {
@@ -266,10 +282,10 @@ function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): bo
       const name = normalizeName(member.profile.name ?? "");
       counts.set(name, (counts.get(name) ?? 0) + 1);
     }
-    return [...counts].sort(([a], [b]) => a.localeCompare(b));
+    return counts;
   };
-  return JSON.stringify(identitySet(left)) === JSON.stringify(identitySet(right))
-    && JSON.stringify(nameCounts(left)) === JSON.stringify(nameCounts(right));
+  return sortedStringsEqual(identitySet(left), identitySet(right))
+    && mapCountsEqual(nameCounts(left), nameCounts(right));
 }
 
 function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidate[]): boolean {
@@ -452,7 +468,7 @@ function resolveFields(context: PageContext, sources: ExtractedData[], provenanc
 function dedupeProvenance(items: ProvenanceItem[]): ProvenanceItem[] {
   const seen = new Set<string>();
   return items.filter((item) => {
-    const key = [item.field, item.value, item.source, item.sourceUrl, item.sourcePath, item.scope, item.confidence, item.entity ?? ""].join("\0");
+    const key = `${item.field}\0${item.value}\0${item.source}\0${item.sourceUrl}\0${item.sourcePath}\0${item.scope}\0${item.confidence}\0${item.entity ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
