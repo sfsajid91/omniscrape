@@ -8,7 +8,7 @@ const cases = new Map(publisherCases.map((publisherCase) => [publisherCase.id, p
 function parse(id: string) {
   const publisherCase = cases.get(id);
   if (!publisherCase) throw new Error(`Missing publisher fixture: ${id}`);
-  return parseHtml(publisherCase.html, publisherCase.pageUrl);
+  return parseHtml({ html: publisherCase.html, pageUrl: publisherCase.pageUrl });
 }
 function provenance(result: ParserOutput, prefix: string) {
   return result.provenance
@@ -17,9 +17,10 @@ function provenance(result: ParserOutput, prefix: string) {
     .sort();
 }
 const articleValues = (result: ParserOutput) => result.articles.map(({ title, url }) => ({ title, url }));
-const articleProvenance = (result: ParserOutput) => result.provenance
-  .filter(({ field }) => field.startsWith("articles["))
-  .map(({ field, sourcePath }) => `${field} @ ${sourcePath}`);
+const articleProvenance = (result: ParserOutput) =>
+  result.provenance
+    .filter(({ field }) => field.startsWith("articles["))
+    .map(({ field, sourcePath }) => `${field} @ ${sourcePath}`);
 const unknownAuthor = { name: "Unknown Author", socials: [] };
 
 describe("integrated publisher-shaped regressions", () => {
@@ -31,8 +32,14 @@ describe("integrated publisher-shaped regressions", () => {
     expect(result.review).toEqual([]);
     expect(result.issues).toEqual([]);
     expect(result.articles).toEqual([
-      { title: "Markets rise as investors assess the latest corporate earnings", url: "https://www.businessinsider.example/markets/first" },
-      { title: "Technology companies announce new products for global customers", url: "https://www.businessinsider.example/technology/second" },
+      {
+        title: "Markets rise as investors assess the latest corporate earnings",
+        url: "https://www.businessinsider.example/markets/first",
+      },
+      {
+        title: "Technology companies announce new products for global customers",
+        url: "https://www.businessinsider.example/technology/second",
+      },
     ]);
     expect(result.metadata).toEqual({
       title: "Alex Rivera - Business Insider",
@@ -64,10 +71,12 @@ describe("integrated publisher-shaped regressions", () => {
     expect(result.authors).toEqual([]);
     expect(result.review).toEqual([]);
     expect(result.issues).toEqual([]);
-    expect(articleValues(result)).toEqual(Array.from({ length: 20 }, (_, index) => ({
-      title: `CBC story headline number ${index + 1} covers a significant event around the world`,
-      url: `https://www.cbc.example/news/story-${index + 1}`,
-    })));
+    expect(articleValues(result)).toEqual(
+      Array.from({ length: 20 }, (_, index) => ({
+        title: `CBC story headline number ${index + 1} covers a significant event around the world`,
+        url: `https://www.cbc.example/news/story-${index + 1}`,
+      })),
+    );
     expect(result.metadata).toEqual({
       title: "World News | CBC",
       description: "The latest world news and analysis from CBC.",
@@ -78,10 +87,15 @@ describe("integrated publisher-shaped regressions", () => {
       "metadata.description @ meta[0]@content",
       "metadata.title @ html:nth-of-type(1) > head:nth-of-type(1) > title:nth-of-type(1)",
     ]);
-    expect(articleProvenance(result)).toEqual(Array.from({ length: 20 }, (_, index) => {
-      const card = `html:nth-of-type(1) > body:nth-of-type(1) > article:nth-of-type(${index + 1})`;
-      return [`articles[${index}].title @ ${card} > h2:nth-of-type(1)`, `articles[${index}].url @ ${card} > h2:nth-of-type(1) > a:nth-of-type(1)@href`];
-    }).flat());
+    expect(articleProvenance(result)).toEqual(
+      Array.from({ length: 20 }, (_, index) => {
+        const card = `html:nth-of-type(1) > body:nth-of-type(1) > article:nth-of-type(${index + 1})`;
+        return [
+          `articles[${index}].title @ ${card} > h2:nth-of-type(1)`,
+          `articles[${index}].url @ ${card} > h2:nth-of-type(1) > a:nth-of-type(1)@href`,
+        ];
+      }).flat(),
+    );
     expect(result.provenance.some(({ field }) => field.startsWith("author."))).toBe(false);
   });
 
@@ -151,10 +165,12 @@ describe("integrated publisher-shaped regressions", () => {
     expect(result.authors).toEqual([]);
     expect(result.review).toEqual([]);
     expect(result.issues).toEqual([]);
-    expect(articleValues(result)).toEqual(Array.from({ length: 17 }, (_, index) => ({
-      title: `World headline number ${index + 1} reports on a significant local development`,
-      url: `https://www.theguardian.example/world/story-${index + 1}`,
-    })));
+    expect(articleValues(result)).toEqual(
+      Array.from({ length: 17 }, (_, index) => ({
+        title: `World headline number ${index + 1} reports on a significant local development`,
+        url: `https://www.theguardian.example/world/story-${index + 1}`,
+      })),
+    );
     expect(result.metadata).toEqual({
       title: "World news | The Guardian",
       description: "Latest international news, analysis and features.",
@@ -165,10 +181,15 @@ describe("integrated publisher-shaped regressions", () => {
       "metadata.description @ meta[0]@content",
       "metadata.title @ html:nth-of-type(1) > head:nth-of-type(1) > title:nth-of-type(1)",
     ]);
-    expect(articleProvenance(result)).toEqual(Array.from({ length: 17 }, (_, index) => {
-      const card = `html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > article:nth-of-type(${index + 1})`;
-      return [`articles[${index}].title @ ${card} > h2:nth-of-type(1)`, `articles[${index}].url @ ${card} > h2:nth-of-type(1) > a:nth-of-type(1)@href`];
-    }).flat());
+    expect(articleProvenance(result)).toEqual(
+      Array.from({ length: 17 }, (_, index) => {
+        const card = `html:nth-of-type(1) > body:nth-of-type(1) > main:nth-of-type(1) > article:nth-of-type(${index + 1})`;
+        return [
+          `articles[${index}].title @ ${card} > h2:nth-of-type(1)`,
+          `articles[${index}].url @ ${card} > h2:nth-of-type(1) > a:nth-of-type(1)@href`,
+        ];
+      }).flat(),
+    );
     expect(result.provenance.some(({ field }) => field.startsWith("author."))).toBe(false);
   });
 });

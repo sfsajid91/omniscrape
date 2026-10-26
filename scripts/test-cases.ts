@@ -1,5 +1,5 @@
 import { parseHtml } from "../src/index";
-import { testCases, type TestCase } from "./cases";
+import { type TestCase, testCases } from "./cases";
 
 type MetaScraper = (input: { html: string; url: string }) => Promise<unknown>;
 type Callable = (...args: unknown[]) => unknown;
@@ -15,12 +15,20 @@ function callable(value: unknown, description: string): Callable {
 
 async function loadMetaScraper(): Promise<MetaScraper> {
   const packageNames = [
-    "metascraper", "metascraper-author", "metascraper-date", "metascraper-description",
-    "metascraper-image", "metascraper-publisher", "metascraper-title", "metascraper-url",
+    "metascraper",
+    "metascraper-author",
+    "metascraper-date",
+    "metascraper-description",
+    "metascraper-image",
+    "metascraper-publisher",
+    "metascraper-title",
+    "metascraper-url",
   ];
   const modules = await Promise.all(packageNames.map(async (packageName): Promise<unknown> => import(packageName)));
   const createMetascraper = callable(defaultExport(modules[0]), "metascraper export");
-  const pluginFactories = modules.slice(1).map((module, index) => callable(defaultExport(module), `${packageNames[index + 1]} export`));
+  const pluginFactories = modules
+    .slice(1)
+    .map((module, index) => callable(defaultExport(module), `${packageNames[index + 1]} export`));
   const scraper = createMetascraper(pluginFactories.map((factory) => factory()));
   return callable(scraper, "metascraper instance") as MetaScraper;
 }
@@ -38,7 +46,7 @@ export async function runCases(cases: readonly TestCase[] = testCases, compare =
   }
   for (const tc of cases) {
     try {
-      const result = parseHtml(tc.html, tc.pageUrl, tc.options);
+      const result = parseHtml({ html: tc.html, pageUrl: tc.pageUrl, ...tc.options });
       tc.verify(result);
       if (comparator) {
         try {
