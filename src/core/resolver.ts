@@ -1,12 +1,19 @@
-import type { PageContext } from "./context";
 import type { DomMetaResult } from "../extractors/dom-meta";
-import type { AuthorCandidate, ExtractedData, ValueEvidence } from "./evidence";
 import type { HydrationResult } from "../extractors/hydration";
 import type { JsonLdResult } from "../extractors/json-ld";
 import {
-  type ArticleItem, type AuthorProfile, type EditorialInfo, type PageMetadata,
-  type ParserOutput, ParserOutputSchema, type ProvenanceItem, type ReviewAuthor, type TechStack,
+  type ArticleItem,
+  type AuthorProfile,
+  type EditorialInfo,
+  type PageMetadata,
+  type ParserOutput,
+  ParserOutputSchema,
+  type ProvenanceItem,
+  type ReviewAuthor,
+  type TechStack,
 } from "../types";
+import type { PageContext } from "./context";
+import type { AuthorCandidate, ExtractedData, ValueEvidence } from "./evidence";
 
 export interface ResolverInput {
   context: PageContext;
@@ -21,22 +28,44 @@ export interface ResolverInput {
   dedupeAuthorProvenance?: boolean;
 }
 
-const AUTHOR_FIELDS = ["name", "givenName", "familyName", "id", "slug", "designation", "bio", "avatarUrl", "email"] as const;
+const AUTHOR_FIELDS = [
+  "name",
+  "givenName",
+  "familyName",
+  "id",
+  "slug",
+  "designation",
+  "bio",
+  "avatarUrl",
+  "email",
+] as const;
 
-function provenanceItem(context: PageContext, field: string, value: string | number, evidence: ValueEvidence, entity?: string): ProvenanceItem {
+function provenanceItem(
+  context: PageContext,
+  field: string,
+  value: string | number,
+  evidence: ValueEvidence,
+  entity?: string,
+): ProvenanceItem {
   return { field, value: String(value), ...evidence, sourceUrl: context.pageUrl, ...(entity ? { entity } : {}) };
 }
 
-function candidateProvenance(context: PageContext, candidate: AuthorCandidate, fieldPrefix = "author"): ProvenanceItem[] {
+function candidateProvenance(
+  context: PageContext,
+  candidate: AuthorCandidate,
+  fieldPrefix = "author",
+): ProvenanceItem[] {
   const items: ProvenanceItem[] = [];
   for (const field of AUTHOR_FIELDS) {
     const value = candidate.profile[field];
     const evidence = candidate.evidence[field];
-    if (value !== undefined && evidence) items.push(provenanceItem(context, `${fieldPrefix}.${field}`, value, evidence, candidate.identity));
+    if (value !== undefined && evidence)
+      items.push(provenanceItem(context, `${fieldPrefix}.${field}`, value, evidence, candidate.identity));
   }
   for (const [index, social] of (candidate.profile.socials ?? []).entries()) {
     const evidence = candidate.socialEvidence?.[index] ?? candidate.evidence.socials;
-    if (evidence) items.push(provenanceItem(context, `${fieldPrefix}.socials`, social.url, evidence, candidate.identity));
+    if (evidence)
+      items.push(provenanceItem(context, `${fieldPrefix}.socials`, social.url, evidence, candidate.identity));
   }
   return items;
 }
@@ -76,7 +105,9 @@ function sameIdentity(a: AuthorCandidate, b: AuthorCandidate): boolean {
   if (cms.profile.id === undefined || !source?.startsWith("hydration:")) return false;
   try {
     const profileUrl = new URL(leftIsUrl ? left : right);
-    return cms.identity === `${source.slice("hydration:".length)}@${profileUrl.host.toLowerCase()}:${String(cms.profile.id)}`;
+    return (
+      cms.identity === `${source.slice("hydration:".length)}@${profileUrl.host.toLowerCase()}:${String(cms.profile.id)}`
+    );
   } catch {
     return false;
   }
@@ -110,12 +141,23 @@ function reviewValuesCompatible(left: AuthorCandidate, right: AuthorCandidate): 
 }
 
 function consolidateReview(context: PageContext, candidates: ReviewCandidate[]): ReviewAuthor[] {
-  const groups: Array<{ reason: ReviewAuthor["reason"]; candidates: AuthorCandidate[]; profile: AuthorProfile; provenance: ProvenanceItem[] }> = [];
+  const groups: Array<{
+    reason: ReviewAuthor["reason"];
+    candidates: AuthorCandidate[];
+    profile: AuthorProfile;
+    provenance: ProvenanceItem[];
+  }> = [];
   for (const { candidate, reason } of candidates) {
-    const group = groups.find((item) => item.reason === reason
-      && item.candidates.every((previous) => reviewIdentityMatches(previous, candidate)
-        && sameName(previous.profile.name, candidate.profile.name)
-        && reviewValuesCompatible(previous, candidate)));
+    const group = groups.find(
+      (item) =>
+        item.reason === reason &&
+        item.candidates.every(
+          (previous) =>
+            reviewIdentityMatches(previous, candidate) &&
+            sameName(previous.profile.name, candidate.profile.name) &&
+            reviewValuesCompatible(previous, candidate),
+        ),
+    );
     const evidence = candidateProvenance(context, candidate);
     if (group) {
       group.candidates.push(candidate);
@@ -125,17 +167,28 @@ function consolidateReview(context: PageContext, candidates: ReviewCandidate[]):
           else group.profile[field] = String(candidate.profile[field]);
         }
       }
-      const socialKeys = new Set((group.profile.socials ?? []).map((social) => `${social.platform}\\0${social.url}\\0${social.handle ?? ""}\\0${social.isPersonal}`));
+      const socialKeys = new Set(
+        (group.profile.socials ?? []).map(
+          (social) => `${social.platform}\\0${social.url}\\0${social.handle ?? ""}\\0${social.isPersonal}`,
+        ),
+      );
       for (const social of candidate.profile.socials ?? []) {
         const key = `${social.platform}\\0${social.url}\\0${social.handle ?? ""}\\0${social.isPersonal}`;
-        if (!socialKeys.has(key)) { socialKeys.add(key); group.profile.socials!.push(social); }
+        if (!socialKeys.has(key)) {
+          socialKeys.add(key);
+          group.profile.socials!.push(social);
+        }
       }
       group.provenance = dedupeProvenance([...group.provenance, ...evidence]);
     } else {
       groups.push({
         reason,
         candidates: [candidate],
-        profile: { ...candidate.profile, name: candidate.profile.name ?? "Unknown Author", socials: [...(candidate.profile.socials ?? [])] },
+        profile: {
+          ...candidate.profile,
+          name: candidate.profile.name ?? "Unknown Author",
+          socials: [...(candidate.profile.socials ?? [])],
+        },
         provenance: evidence,
       });
     }
@@ -143,15 +196,26 @@ function consolidateReview(context: PageContext, candidates: ReviewCandidate[]):
   return groups.map(({ reason, profile, provenance }) => ({ reason, author: profile, provenance }));
 }
 
-function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], provenance: ProvenanceItem[], review: ReviewAuthor[], fieldPrefix = "author"): AuthorProfile {
+function resolveAuthor(
+  context: PageContext,
+  candidates: AuthorCandidate[],
+  provenance: ProvenanceItem[],
+  review: ReviewAuthor[],
+  fieldPrefix = "author",
+): AuthorProfile {
   const named = candidates.filter((candidate) => !!candidate.profile.name && !!candidate.evidence.name);
-  const primary = named.filter((candidate) => candidate.primary).sort((a, b) => rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity));
+  const primary = named
+    .filter((candidate) => candidate.primary)
+    .sort((a, b) => rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity));
   const anchor = primary[0];
   const strongest = anchor ? primary.filter((candidate) => rank(candidate) === rank(anchor)) : [];
-  const ambiguous = !!anchor && strongest.some((candidate) =>
-    !sameName(anchor.profile.name, candidate.profile.name) ||
-    (!sameIdentity(anchor, candidate) && !!anchor.identity && !!candidate.identity)
-  );
+  const ambiguous =
+    !!anchor &&
+    strongest.some(
+      (candidate) =>
+        !sameName(anchor.profile.name, candidate.profile.name) ||
+        (!sameIdentity(anchor, candidate) && !!anchor.identity && !!candidate.identity),
+    );
   const reviewCandidates: ReviewCandidate[] = [];
   const addReview = (candidate: AuthorCandidate, reason: ReviewAuthor["reason"]) => {
     reviewCandidates.push({ candidate, reason });
@@ -165,17 +229,23 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
 
   const matching: AuthorCandidate[] = [];
   for (const candidate of candidates) {
-    if (sameIdentity(anchor, candidate) && (!candidate.profile.name || sameName(anchor.profile.name, candidate.profile.name))) {
+    if (
+      sameIdentity(anchor, candidate) &&
+      (!candidate.profile.name || sameName(anchor.profile.name, candidate.profile.name))
+    ) {
       matching.push(candidate);
     } else if (!candidate.identity && sameName(anchor.profile.name, candidate.profile.name)) {
       const scope = candidate.evidence.name?.scope;
       if (scope === "byline" || scope === "profile") {
         matching.push(candidate);
       } else {
-        const hasNonNameAttributes = AUTHOR_FIELDS.some((field) => field !== "name" && candidate.profile[field] !== undefined)
-          || (candidate.profile.socials?.length ?? 0) > 0;
+        const hasNonNameAttributes =
+          AUTHOR_FIELDS.some((field) => field !== "name" && candidate.profile[field] !== undefined) ||
+          (candidate.profile.socials?.length ?? 0) > 0;
         if (!hasNonNameAttributes && candidate.evidence.name) {
-          provenance.push(provenanceItem(context, `${fieldPrefix}.name`, candidate.profile.name!, candidate.evidence.name));
+          provenance.push(
+            provenanceItem(context, `${fieldPrefix}.name`, candidate.profile.name!, candidate.evidence.name),
+          );
         } else {
           addReview(candidate, "different_identity");
         }
@@ -197,7 +267,12 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
       const value = candidate.profile[field];
       if (value === undefined || !candidate.evidence[field]) continue;
       const previous = values.get(field);
-      if (previous !== undefined && previous !== value && !(field === "name" && sameName(String(previous), String(value)))) conflicting.add(field);
+      if (
+        previous !== undefined &&
+        previous !== value &&
+        !(field === "name" && sameName(String(previous), String(value)))
+      )
+        conflicting.add(field);
       else if (previous === undefined) values.set(field, value);
     }
   }
@@ -216,8 +291,14 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
   if (conflicting.has("name")) author.name = "Unknown Author";
   const seenSocials = new Set<string>();
   for (const candidate of matching) {
-    if (conflicting.size && AUTHOR_FIELDS.some((field) => conflicting.has(field) && candidate.profile[field] !== undefined)) {
-      addReview({ ...candidate, profile: { ...candidate.profile, name: candidate.profile.name ?? anchor.profile.name } }, "conflicting_value");
+    if (
+      conflicting.size &&
+      AUTHOR_FIELDS.some((field) => conflicting.has(field) && candidate.profile[field] !== undefined)
+    ) {
+      addReview(
+        { ...candidate, profile: { ...candidate.profile, name: candidate.profile.name ?? anchor.profile.name } },
+        "conflicting_value",
+      );
     }
     for (const item of candidateProvenance(context, candidate, fieldPrefix)) {
       const field = item.field.slice(fieldPrefix.length + 1);
@@ -226,7 +307,8 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
     if (Array.isArray(candidate.profile.emails)) {
       for (const email of candidate.profile.emails) {
         const evidence = candidate.evidence.email ?? candidate.evidence.name;
-        if (evidence) provenance.push(provenanceItem(context, `${fieldPrefix}.emails`, email, evidence, candidate.identity));
+        if (evidence)
+          provenance.push(provenanceItem(context, `${fieldPrefix}.emails`, email, evidence, candidate.identity));
       }
     }
     for (const [index, social] of (candidate.profile.socials ?? []).entries()) {
@@ -234,7 +316,10 @@ function resolveAuthor(context: PageContext, candidates: AuthorCandidate[], prov
       const evidence = candidate.socialEvidence?.[index] ?? candidate.evidence.socials;
       if (!evidence) continue;
       const key = `${social.platform}:${social.url.replace(/\/$/, "")}`;
-      if (!seenSocials.has(key)) { seenSocials.add(key); author.socials.push(social); }
+      if (!seenSocials.has(key)) {
+        seenSocials.add(key);
+        author.socials.push(social);
+      }
       provenance.push(provenanceItem(context, `${fieldPrefix}.socials`, social.url, evidence, candidate.identity));
     }
   }
@@ -274,7 +359,11 @@ function mapCountsEqual(a: Map<string, number>, b: Map<string, number>): boolean
 }
 
 function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): boolean {
-  const identitySet = (members: AuthorCandidate[]) => members.map(membershipIdentity).filter((value): value is string => !!value).sort();
+  const identitySet = (members: AuthorCandidate[]) =>
+    members
+      .map(membershipIdentity)
+      .filter((value): value is string => !!value)
+      .sort();
   const nameCounts = (members: AuthorCandidate[]) => {
     const counts = new Map<string, number>();
     for (const member of members) {
@@ -284,15 +373,21 @@ function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): bo
     }
     return counts;
   };
-  return sortedStringsEqual(identitySet(left), identitySet(right))
-    && mapCountsEqual(nameCounts(left), nameCounts(right));
+  return (
+    sortedStringsEqual(identitySet(left), identitySet(right)) && mapCountsEqual(nameCounts(left), nameCounts(right))
+  );
 }
 
 function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidate[]): boolean {
   const remaining = [...members];
   for (const candidate of strongest) {
     const index = remaining.findIndex((member) => {
-      if (candidate.identity || member.identity) return !!candidate.identity && !!member.identity && normalizedIdentity(candidate.identity) === normalizedIdentity(member.identity);
+      if (candidate.identity || member.identity)
+        return (
+          !!candidate.identity &&
+          !!member.identity &&
+          normalizedIdentity(candidate.identity) === normalizedIdentity(member.identity)
+        );
       return sameName(candidate.profile.name, member.profile.name);
     });
     if (index < 0) return false;
@@ -301,7 +396,13 @@ function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidat
   return true;
 }
 
-function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], author: AuthorProfile, provenance: ProvenanceItem[], dedupeAuthorProvenance = false): AuthorProfile[] {
+function resolveAuthors(
+  context: PageContext,
+  candidates: AuthorCandidate[],
+  author: AuthorProfile,
+  provenance: ProvenanceItem[],
+  dedupeAuthorProvenance = false,
+): AuthorProfile[] {
   if (author.name !== "Unknown Author") {
     if (!dedupeAuthorProvenance) {
       const authorProvenance: ProvenanceItem[] = [];
@@ -310,7 +411,8 @@ function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], aut
     }
     return [author];
   }
-  const primary = candidates.filter((candidate) => candidate.primary && !!candidate.profile.name && !!candidate.evidence.name)
+  const primary = candidates
+    .filter((candidate) => candidate.primary && !!candidate.profile.name && !!candidate.evidence.name)
     .sort((a, b) => rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity));
   const anchor = primary[0];
   if (!anchor) return [];
@@ -320,16 +422,30 @@ function resolveAuthors(context: PageContext, candidates: AuthorCandidate[], aut
   for (const candidate of strongest) {
     for (const group of candidate.authorshipGroups ?? []) if (!groupKeys.includes(group)) groupKeys.push(group);
   }
-  const groups = groupKeys.map((key) => uniqueAuthorshipMembers(candidates.filter((candidate) =>
-    candidate.primary && candidate.profile.name && candidate.evidence.name && candidate.authorshipGroups?.includes(key))));
-  if (groups.some((members) => members.length < 2 || !containsStrongest(members, uniqueAuthorshipMembers(strongest)))) return [];
+  const groups = groupKeys.map((key) =>
+    uniqueAuthorshipMembers(
+      candidates.filter(
+        (candidate) =>
+          candidate.primary &&
+          candidate.profile.name &&
+          candidate.evidence.name &&
+          candidate.authorshipGroups?.includes(key),
+      ),
+    ),
+  );
+  if (groups.some((members) => members.length < 2 || !containsStrongest(members, uniqueAuthorshipMembers(strongest))))
+    return [];
   const first = groups[0];
   if (!first || groups.some((members) => !membershipsAgree(first, members))) return [];
   const authors: AuthorProfile[] = [];
   for (const [index, member] of first.entries()) {
     const matching = member.identity
-      ? candidates.filter((candidate) => !!candidate.identity && sameIdentity(member, candidate)
-        && (!candidate.profile.name || sameName(member.profile.name, candidate.profile.name)))
+      ? candidates.filter(
+          (candidate) =>
+            !!candidate.identity &&
+            sameIdentity(member, candidate) &&
+            (!candidate.profile.name || sameName(member.profile.name, candidate.profile.name)),
+        )
       : [member];
     const authorProvenance: ProvenanceItem[] = [];
     const resolved = resolveAuthor(context, matching, authorProvenance, [], `authors[${index}]`);
@@ -376,9 +492,12 @@ function resolveArticles(
         for (const field of ["title", "url", "publishedAt"] as const) {
           const value = article[field];
           if (value === undefined || value !== accepted[field]) continue;
-          provenance.push(provenanceItem(context, `articles[${index}].${field}`, value, {
-            ...evidence, sourcePath: fieldPaths?.[field] ?? `${evidence.sourcePath}.${field}`,
-          }));
+          provenance.push(
+            provenanceItem(context, `articles[${index}].${field}`, value, {
+              ...evidence,
+              sourcePath: fieldPaths?.[field] ?? `${evidence.sourcePath}.${field}`,
+            }),
+          );
         }
       }
     }
@@ -404,11 +523,17 @@ function sourcePriority(source: string): number {
   return 0;
 }
 
-function resolveFields(context: PageContext, sources: ExtractedData[], provenance: ProvenanceItem[]): { editorial: EditorialInfo; metadata: PageMetadata } {
+function resolveFields(
+  context: PageContext,
+  sources: ExtractedData[],
+  provenance: ProvenanceItem[],
+): { editorial: EditorialInfo; metadata: PageMetadata } {
   const editorial: EditorialInfo = {};
   const metadata: PageMetadata = {};
   const allFields = sources.flatMap((source) => source.fields);
-  const precisePublicationTime = allFields.some((item) => item.field === "metadata.publishedTime" && item.evidence.confidence !== "low");
+  const precisePublicationTime = allFields.some(
+    (item) => item.field === "metadata.publishedTime" && item.evidence.confidence !== "low",
+  );
   const fields = precisePublicationTime
     ? allFields.filter((item) => item.field !== "metadata.publishedTime" || item.evidence.confidence !== "low")
     : allFields;
@@ -419,9 +544,12 @@ function resolveFields(context: PageContext, sources: ExtractedData[], provenanc
     if (values.has(field)) {
       const existing = values.get(field)!;
       if (existing.value !== value) {
-        if ((field === "metadata.publishedTime" || field === "metadata.modifiedTime") &&
-            typeof existing.value === "string" && typeof value === "string" &&
-            isDateConcordant(existing.value, value)) {
+        if (
+          (field === "metadata.publishedTime" || field === "metadata.modifiedTime") &&
+          typeof existing.value === "string" &&
+          typeof value === "string" &&
+          isDateConcordant(existing.value, value)
+        ) {
           if (priority > existing.priority) {
             values.set(field, { value, priority });
           }
@@ -433,32 +561,66 @@ function resolveFields(context: PageContext, sources: ExtractedData[], provenanc
       values.set(field, { value, priority });
     }
   }
-  for (const field of conflicts) context.issues.push({ sourcePath: field, message: `Conflicting values for ${field}; left missing` });
+  for (const field of conflicts)
+    context.issues.push({ sourcePath: field, message: `Conflicting values for ${field}; left missing` });
   for (const [field, entry] of values) {
     if (conflicts.has(field)) continue;
     const value = entry.value;
     switch (field) {
-      case "editorial.ownerName": editorial.ownerName = String(value); break;
-      case "editorial.ownerId": editorial.ownerId = value; break;
-      case "editorial.ownerEmail": editorial.ownerEmail = String(value); break;
-      case "editorial.assigneeName": editorial.assigneeName = String(value); break;
-      case "editorial.assigneeId": editorial.assigneeId = value; break;
-      case "editorial.publisher": editorial.publisher = String(value); break;
-      case "metadata.title": metadata.title = String(value); break;
-      case "metadata.description": metadata.description = String(value); break;
-      case "metadata.canonicalUrl": metadata.canonicalUrl = String(value); break;
-      case "metadata.ogImage": metadata.ogImage = String(value); break;
-      case "metadata.language": metadata.language = String(value); break;
-      case "metadata.publishedTime": metadata.publishedTime = String(value); break;
-      case "metadata.modifiedTime": metadata.modifiedTime = String(value); break;
-      default: continue;
+      case "editorial.ownerName":
+        editorial.ownerName = String(value);
+        break;
+      case "editorial.ownerId":
+        editorial.ownerId = value;
+        break;
+      case "editorial.ownerEmail":
+        editorial.ownerEmail = String(value);
+        break;
+      case "editorial.assigneeName":
+        editorial.assigneeName = String(value);
+        break;
+      case "editorial.assigneeId":
+        editorial.assigneeId = value;
+        break;
+      case "editorial.publisher":
+        editorial.publisher = String(value);
+        break;
+      case "metadata.title":
+        metadata.title = String(value);
+        break;
+      case "metadata.description":
+        metadata.description = String(value);
+        break;
+      case "metadata.canonicalUrl":
+        metadata.canonicalUrl = String(value);
+        break;
+      case "metadata.ogImage":
+        metadata.ogImage = String(value);
+        break;
+      case "metadata.language":
+        metadata.language = String(value);
+        break;
+      case "metadata.publishedTime":
+        metadata.publishedTime = String(value);
+        break;
+      case "metadata.modifiedTime":
+        metadata.modifiedTime = String(value);
+        break;
+      default:
+        continue;
     }
   }
   for (const { field, value, evidence } of fields) {
     if (conflicts.has(field)) continue;
     const accepted = values.get(field);
     if (!accepted) continue;
-    if (accepted.value === value || ((field === "metadata.publishedTime" || field === "metadata.modifiedTime") && typeof accepted.value === "string" && typeof value === "string" && isDateConcordant(accepted.value, value))) {
+    if (
+      accepted.value === value ||
+      ((field === "metadata.publishedTime" || field === "metadata.modifiedTime") &&
+        typeof accepted.value === "string" &&
+        typeof value === "string" &&
+        isDateConcordant(accepted.value, value))
+    ) {
       provenance.push(provenanceItem(context, field, value, evidence));
     }
   }
@@ -486,12 +648,22 @@ export function resolveParserOutput(input: ResolverInput): ParserOutput {
   const articles = resolveArticles(context, sources, collected, input);
   const { editorial, metadata } = resolveFields(context, sources, collected);
   const rawProvenance = input.provenanceScope === "none" ? [] : dedupeProvenance(collected);
-  const provenance = input.provenanceScope === "identity"
-    ? rawProvenance.filter((item) => !item.field.startsWith("articles["))
-    : rawProvenance;
+  const provenance =
+    input.provenanceScope === "identity"
+      ? rawProvenance.filter((item) => !item.field.startsWith("articles["))
+      : rawProvenance;
   return ParserOutputSchema.parse({
-    url: context.pageUrl, parsedAt: new Date().toISOString(), techStack: input.techStack,
-    author, authors, editorial, articles, metadata, provenance, review, issues: context.issues,
+    url: context.pageUrl,
+    parsedAt: new Date().toISOString(),
+    techStack: input.techStack,
+    author,
+    authors,
+    editorial,
+    articles,
+    metadata,
+    provenance,
+    review,
+    issues: context.issues,
     ...(input.includeRawHydration ? { rawHydration: input.hydration.raw } : {}),
   });
 }

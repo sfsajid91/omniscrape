@@ -19,7 +19,9 @@ describe("parser resource and boundary isolation", () => {
   test("enforces script byte limits while retaining later independent DOM evidence", () => {
     const scriptBody = `window.__INITIAL_STATE__ = {author:{name:"Script Writer"}};`;
     const html = `<script>${scriptBody}</script>${authorMeta}`;
-    const atLimit = parseHtml(`<script>${scriptBody}</script>`, page, { maxScriptBytes: Buffer.byteLength(scriptBody) });
+    const atLimit = parseHtml(`<script>${scriptBody}</script>`, page, {
+      maxScriptBytes: Buffer.byteLength(scriptBody),
+    });
     expect(atLimit.author.name).toBe("Script Writer");
     const overLimit = parseHtml(html, page, { maxScriptBytes: Buffer.byteLength(scriptBody) - 1 });
     expect(overLimit.author.name).toBe("Boundary Writer");
@@ -43,12 +45,15 @@ describe("parser resource and boundary isolation", () => {
     const ordinary = parseHtml(html, page);
     const included = parseHtml(html, page, { includeRawHydration: true });
     expect(ordinary.rawHydration).toBeUndefined();
-    expect(included.rawHydration).toEqual([{ source: "next-pages", path: "script[0]#props.pageProps", value: { author: { name: "Raw Writer", id: 7 } } }]);
+    expect(included.rawHydration).toEqual([
+      { source: "next-pages", path: "script[0]#props.pageProps", value: { author: { name: "Raw Writer", id: 7 } } },
+    ]);
     expect(included.author).toEqual(ordinary.author);
   });
 
   test("bounds raw snapshots and ignores cyclic Flight references without fabricating people", () => {
-    const flight = '0:{"author":"$99","cycle":"$1"}\\n1:{"name":"Cycle Writer","email":"fake@example.org","next":"$1"}\\n';
+    const flight =
+      '0:{"author":"$99","cycle":"$1"}\\n1:{"name":"Cycle Writer","email":"fake@example.org","next":"$1"}\\n';
     const html = `<script>self.__next_f.push([1,${JSON.stringify(flight)}])</script><script id="__NEXT_DATA__">{"props":{"pageProps":{"author":{"name":"Raw Source Writer","id":7}}}}</script><meta name="author" content="Independent Writer">`;
     const result = parseHtml(html, page, { includeRawHydration: true, maxDecodeNodes: 1 });
     expect(result.author.name).toBe("Independent Writer");
@@ -58,7 +63,10 @@ describe("parser resource and boundary isolation", () => {
   });
 
   test("keeps a valid DOM source after malformed JSON-LD and malformed hydration", () => {
-    const result = parseHtml(`<script type="application/ld+json">{bad</script><script id="__NUXT_DATA__">{bad</script>${authorMeta}`, page);
+    const result = parseHtml(
+      `<script type="application/ld+json">{bad</script><script id="__NUXT_DATA__">{bad</script>${authorMeta}`,
+      page,
+    );
     expect(result.author.name).toBe("Boundary Writer");
     expect(result.issues.some(({ message }) => message === "Malformed JSON-LD")).toBe(true);
     expect(result.issues.some(({ message }) => message.startsWith("Nuxt devalue decode failed"))).toBe(true);

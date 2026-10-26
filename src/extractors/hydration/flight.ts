@@ -1,24 +1,34 @@
 import type { PageContext } from "../../core/context";
 import { isRecord } from "../../values";
-import { isAstNode, type AstNode } from "./static-eval";
+import { type AstNode, isAstNode } from "./static-eval";
 
 export type ScriptParseResult = { program: AstNode } | { error: unknown };
 export type FlightOutput = { value: unknown; path: string; origins: WeakMap<object, string> };
 
 export function recoverFlightNewlineScript(script: string, error: unknown): string | undefined {
-  if (!(error instanceof Error) || !error.message.includes("Unterminated string constant") || !isRecord(error)) return undefined;
+  if (!(error instanceof Error) || !error.message.includes("Unterminated string constant") || !isRecord(error))
+    return undefined;
   const position = error.pos;
-  if (typeof position !== "number" || !Number.isInteger(position) || position < 0 || position >= script.length) return undefined;
+  if (typeof position !== "number" || !Number.isInteger(position) || position < 0 || position >= script.length)
+    return undefined;
   const quote = script[position];
   if (quote !== "'" && quote !== '"') return undefined;
-  const prefix = /(?:^|[;{}])\s*(?:self|window|globalThis)\s*\.\s*__next_f\s*\.\s*push\s*\(\s*\[\s*1\s*,\s*$/.exec(script.slice(0, position));
+  const prefix = /(?:^|[;{}])\s*(?:self|window|globalThis)\s*\.\s*__next_f\s*\.\s*push\s*\(\s*\[\s*1\s*,\s*$/.exec(
+    script.slice(0, position),
+  );
   if (!prefix) return undefined;
   const newlines: number[] = [];
   let closing = -1;
   for (let index = position + 1; index < script.length; index++) {
     const character = script[index];
-    if (character === "\\") { index++; continue; }
-    if (character === quote) { closing = index; break; }
+    if (character === "\\") {
+      index++;
+      continue;
+    }
+    if (character === quote) {
+      closing = index;
+      break;
+    }
     if (character === "\r" || character === "\n") newlines.push(index);
   }
   if (closing < 0 || !newlines.length || !/^\s*\]\s*\)\s*;?(?:\s|$)/.test(script.slice(closing + 1))) return undefined;
@@ -52,10 +62,12 @@ export function parseFlightRecords(
           if (tuple?.type === "ArrayExpression") {
             const elements = tuple.elements as AstNode[];
             const payload = elements[1] as AstNode | undefined;
-            const value = payload?.type === "Literal" && typeof payload.value === "string" ? payload.value :
-              payload?.type === "TemplateLiteral" && (payload.expressions as AstNode[]).length === 0
-                ? ((payload.quasis as AstNode[])[0]?.value as { cooked?: unknown } | undefined)?.cooked
-                : undefined;
+            const value =
+              payload?.type === "Literal" && typeof payload.value === "string"
+                ? payload.value
+                : payload?.type === "TemplateLiteral" && (payload.expressions as AstNode[]).length === 0
+                  ? ((payload.quasis as AstNode[])[0]?.value as { cooked?: unknown } | undefined)?.cooked
+                  : undefined;
             if (elements[0]?.type === "Literal" && elements[0].value === 1 && typeof value === "string") {
               found.push({ start: typeof node.start === "number" ? node.start : 0, text: value, path: script.path });
             }
@@ -94,7 +106,11 @@ export function parseFlightRecords(
         return;
       }
       try {
-        records.push({ id: currentId, value: JSON.parse(currentPayload), path: `${currentSourcePath}#flight:${currentId}` });
+        records.push({
+          id: currentId,
+          value: JSON.parse(currentPayload),
+          path: `${currentSourcePath}#flight:${currentId}`,
+        });
       } catch {
         /* text/model records are intentionally ignored */
       }
@@ -210,19 +226,35 @@ export function parseFlightRecords(
     const value = resolveRecord(record.id, 0);
     return value === undefined ? [] : [{ value, path: record.path, origins }];
   });
-  if (limited) context.issues.push({ sourcePath: scripts[0]?.path ?? "script", message: "Flight decode limit exceeded" });
+  if (limited)
+    context.issues.push({ sourcePath: scripts[0]?.path ?? "script", message: "Flight decode limit exceeded" });
   return output;
 }
 
 function isFlightPush(node: AstNode): boolean {
-  if (node.type !== "MemberExpression" || node.computed || (node.property as AstNode).type !== "Identifier" || (node.property as AstNode).name !== "push") return false;
+  if (
+    node.type !== "MemberExpression" ||
+    node.computed ||
+    (node.property as AstNode).type !== "Identifier" ||
+    (node.property as AstNode).name !== "push"
+  )
+    return false;
   return isNextFObject(node.object as AstNode);
 }
 
 function isNextFObject(node: AstNode): boolean {
-  if (node.type === "AssignmentExpression" || node.type === "LogicalExpression") return isNextFObject(node.left as AstNode);
+  if (node.type === "AssignmentExpression" || node.type === "LogicalExpression")
+    return isNextFObject(node.left as AstNode);
   if (node.type === "SequenceExpression") return (node.expressions as AstNode[]).some(isNextFObject);
-  if (node.type !== "MemberExpression" || node.computed || (node.property as AstNode).type !== "Identifier" || (node.property as AstNode).name !== "__next_f") return false;
+  if (
+    node.type !== "MemberExpression" ||
+    node.computed ||
+    (node.property as AstNode).type !== "Identifier" ||
+    (node.property as AstNode).name !== "__next_f"
+  )
+    return false;
   const target = node.object as AstNode;
-  return target.type === "Identifier" && (target.name === "self" || target.name === "window" || target.name === "globalThis");
+  return (
+    target.type === "Identifier" && (target.name === "self" || target.name === "window" || target.name === "globalThis")
+  );
 }

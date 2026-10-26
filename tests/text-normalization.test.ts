@@ -20,7 +20,10 @@ describe("text normalization boundaries", () => {
   });
 
   test("decodes encoded description markup but never promotes it to an author bio", () => {
-    const result = parseHtml(`<meta name="description" content="A &amp;eacute; summary with &lt;a href='/person'&gt;markup&lt;/a&gt;."><title>Publisher</title>`, "https://publisher.example/story");
+    const result = parseHtml(
+      `<meta name="description" content="A &amp;eacute; summary with &lt;a href='/person'&gt;markup&lt;/a&gt;."><title>Publisher</title>`,
+      "https://publisher.example/story",
+    );
     expect(result.metadata.description).toBe("A é summary with markup .");
     expect(result.author.name).toBe("Unknown Author");
     expect(result.author.bio).toBeUndefined();
@@ -44,23 +47,35 @@ describe("text normalization boundaries", () => {
   });
 
   test("decodes encoded JSON-LD names and retains their explicit profile identity", () => {
-    const result = parseHtml(`<script type="application/ld+json">{"@type":"ProfilePage","mainEntity":{"@type":"Person","name":"Ren&#233; Writer","url":"https://publisher.example/authors/rene"}}</script>`, "https://publisher.example/authors/rene");
+    const result = parseHtml(
+      `<script type="application/ld+json">{"@type":"ProfilePage","mainEntity":{"@type":"Person","name":"Ren&#233; Writer","url":"https://publisher.example/authors/rene"}}</script>`,
+      "https://publisher.example/authors/rene",
+    );
     expect(result.author.name).toBe("René Writer");
   });
 
   test("normalizes decomposed and composed Unicode on the same explicit identity", () => {
-    const result = parseHtml(`<script type="application/ld+json">{"@type":"ProfilePage","mainEntity":{"@type":"Person","name":"José Writer","url":"https://publisher.example/authors/jose"}}</script><div class="byline"><a href="/authors/jose">José Writer</a></div>`, "https://publisher.example/story");
+    const result = parseHtml(
+      `<script type="application/ld+json">{"@type":"ProfilePage","mainEntity":{"@type":"Person","name":"José Writer","url":"https://publisher.example/authors/jose"}}</script><div class="byline"><a href="/authors/jose">José Writer</a></div>`,
+      "https://publisher.example/story",
+    );
     expect(result.author.name).toBe("José Writer");
     expect(result.review).toEqual([]);
   });
 
   test("does not retain tag-only descriptions", () => {
-    const result = parseHtml(`<meta name="description" content="&lt;p&gt;&lt;/p&gt;">`, "https://publisher.example/story");
+    const result = parseHtml(
+      `<meta name="description" content="&lt;p&gt;&lt;/p&gt;">`,
+      "https://publisher.example/story",
+    );
     expect(result.metadata.description).toBeUndefined();
   });
 
   test("keeps already decoded DOM description values stable", () => {
-    const result = parseHtml(`<meta name="description" content="A &amp; B"><meta name="author" content="Newsroom">`, "https://publisher.example/story");
+    const result = parseHtml(
+      `<meta name="description" content="A &amp; B"><meta name="author" content="Newsroom">`,
+      "https://publisher.example/story",
+    );
     expect(result.metadata.description).toBe("A & B");
     expect(result.author.name).toBe("Newsroom");
   });

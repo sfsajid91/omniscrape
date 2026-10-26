@@ -1,3 +1,3 @@
-export { parseHtml, type ParseOptions, type ParseHtmlInput } from "./parse";
 export type { ExtractionLimits } from "./core/context";
+export { type ParseHtmlInput, type ParseOptions, parseHtml } from "./parse";
 export * from "./types";

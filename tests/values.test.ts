@@ -4,13 +4,33 @@ import { dateString, emailAddress, httpUrl, imageUrl, personName, socialLink, st
 const base = "https://publisher.example/authors/alice";
 
 test("social links require actual platform hosts and personal profile paths", () => {
-  for (const value of ["https://linkedin.com.attacker.example/in/alice", "https://elsewhere.example/?next=https://x.com/alice", "https://x.com/intent/tweet?text=hello", "https://instagram.com/p/post", "https://linkedin.com/in/alice/details", "javascript:alert(1)"]) {
+  for (const value of [
+    "https://linkedin.com.attacker.example/in/alice",
+    "https://elsewhere.example/?next=https://x.com/alice",
+    "https://x.com/intent/tweet?text=hello",
+    "https://instagram.com/p/post",
+    "https://linkedin.com/in/alice/details",
+    "javascript:alert(1)",
+  ]) {
     expect(socialLink(value, base)).toBeUndefined();
   }
   const linkedin = socialLink("https://www.linkedin.com/in/alice/?trk=site#about", base);
-  expect(linkedin).toMatchObject({ platform: "linkedin", url: "https://www.linkedin.com/in/alice", handle: "alice", isPersonal: true });
-  expect(socialLink("https://linkedin.com/company/publisher", base)).toMatchObject({ platform: "linkedin", handle: "publisher", isPersonal: false });
-  expect(socialLink("https://bsky.app/profile/tomwarren.co.uk", base)).toMatchObject({ platform: "bluesky", handle: "tomwarren.co.uk", isPersonal: true });
+  expect(linkedin).toMatchObject({
+    platform: "linkedin",
+    url: "https://www.linkedin.com/in/alice",
+    handle: "alice",
+    isPersonal: true,
+  });
+  expect(socialLink("https://linkedin.com/company/publisher", base)).toMatchObject({
+    platform: "linkedin",
+    handle: "publisher",
+    isPersonal: false,
+  });
+  expect(socialLink("https://bsky.app/profile/tomwarren.co.uk", base)).toMatchObject({
+    platform: "bluesky",
+    handle: "tomwarren.co.uk",
+    isPersonal: true,
+  });
   expect(socialLink("https://threads.net/@alice", base)?.handle).toBe("alice");
   expect(socialLink("https://youtube.com/@alice", base)?.handle).toBe("alice");
   expect(socialLink("https://youtube.com/channel/UC123", base)).toMatchObject({ handle: "UC123", isPersonal: false });
@@ -58,4 +78,3 @@ test("decodes one remaining HTML character-reference layer before stripping mark
   expect(stripHtml("Ren&amp;eacute; &lt;b&gt;Writer&lt;/b&gt;")).toBe("Ren&eacute; Writer");
   expect(stripHtml("Ren&amp;amp;eacute;")).toBe("Ren&amp;eacute;");
 });
-

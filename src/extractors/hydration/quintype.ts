@@ -11,13 +11,25 @@ export function publisherNamespace(context: PageContext): string {
 }
 
 export function quintypeRoot(value: unknown, path: string): { value: unknown; path: string } {
-  if (isRecord(value) && isRecord(value.qt) && value.qt.data !== undefined) return { value: value.qt.data, path: `${path}.qt.data` };
+  if (isRecord(value) && isRecord(value.qt) && value.qt.data !== undefined)
+    return { value: value.qt.data, path: `${path}.qt.data` };
   if (isRecord(value) && value.data !== undefined) return { value: value.data, path: `${path}.data` };
   return { value, path };
 }
 
-function addField(out: ExtractedData, field: string, value: string | number, source: string, sourcePath: string, scope: ValueEvidence["scope"]): void {
-  out.fields.push({ field, value, evidence: { source: `hydration:${source}`, sourcePath, scope, confidence: "medium" } });
+function addField(
+  out: ExtractedData,
+  field: string,
+  value: string | number,
+  source: string,
+  sourcePath: string,
+  scope: ValueEvidence["scope"],
+): void {
+  out.fields.push({
+    field,
+    value,
+    evidence: { source: `hydration:${source}`, sourcePath, scope, confidence: "medium" },
+  });
 }
 
 export function correlateQuintypeCollectionEntities(
@@ -35,8 +47,8 @@ export function correlateQuintypeCollectionEntities(
   const collection = isRecord(root.authorCollection)
     ? root.authorCollection
     : isRecord(root.collection)
-    ? root.collection
-    : undefined;
+      ? root.collection
+      : undefined;
   if (!collection || !Array.isArray(collection.items)) return;
 
   const seenAuthorEmails = new Set<string>();
@@ -98,9 +110,24 @@ export function correlateQuintypeCollectionEntities(
                 socials: [],
               },
               evidence: {
-                name: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.name`, scope: "profile", confidence: "high" },
-                email: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.email`, scope: "profile", confidence: "high" },
-                id: { source: `hydration:${sourceName}`, sourcePath: `${candPath}.id`, scope: "profile", confidence: "high" },
+                name: {
+                  source: `hydration:${sourceName}`,
+                  sourcePath: `${candPath}.name`,
+                  scope: "profile",
+                  confidence: "high",
+                },
+                email: {
+                  source: `hydration:${sourceName}`,
+                  sourcePath: `${candPath}.email`,
+                  scope: "profile",
+                  confidence: "high",
+                },
+                id: {
+                  source: `hydration:${sourceName}`,
+                  sourcePath: `${candPath}.id`,
+                  scope: "profile",
+                  confidence: "high",
+                },
               },
             });
           }

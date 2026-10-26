@@ -39,10 +39,25 @@ export interface PageContext {
   issues: Array<{ sourcePath: string; message: string }>;
 }
 
-export function createPageContext(document: ParserDocument, html: string, pageUrl: string, limits: ExtractionLimits): PageContext {
+export function createPageContext(
+  document: ParserDocument,
+  html: string,
+  pageUrl: string,
+  limits: ExtractionLimits,
+): PageContext {
   const context: PageContext = {
-    document, html, pageUrl, baseUrl: pageUrl, limits, includeRawHydration: false,
-    scripts: [], scriptsById: new Map(), meta: new Map(), authorMeta: [], links: [], issues: [],
+    document,
+    html,
+    pageUrl,
+    baseUrl: pageUrl,
+    limits,
+    includeRawHydration: false,
+    scripts: [],
+    scriptsById: new Map(),
+    meta: new Map(),
+    authorMeta: [],
+    links: [],
+    issues: [],
   };
   let scriptIndex = 0;
   let metaIndex = 0;
@@ -57,7 +72,12 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
         context.issues.push({ sourcePath: path, message: "Script exceeds maxScriptBytes" });
         continue;
       }
-      const script: ScriptData = { id: element.id, type: (element.getAttribute("type") ?? "").toLowerCase().trim(), text: value, path };
+      const script: ScriptData = {
+        id: element.id,
+        type: (element.getAttribute("type") ?? "").toLowerCase().trim(),
+        text: value,
+        path,
+      };
       context.scripts.push(script);
       if (script.id && !context.scriptsById.has(script.id)) context.scriptsById.set(script.id, script);
     } else if (tag === "meta") {
@@ -72,7 +92,11 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
         }
       }
     } else if (tag === "link") {
-      context.links.push({ rel: (element.getAttribute("rel") ?? "").toLowerCase(), href: element.getAttribute("href") ?? "", path: `link[${linkIndex++}]@href` });
+      context.links.push({
+        rel: (element.getAttribute("rel") ?? "").toLowerCase(),
+        href: element.getAttribute("href") ?? "",
+        path: `link[${linkIndex++}]@href`,
+      });
     } else if (!hasBase) {
       hasBase = true;
       context.baseUrl = httpUrl(element.getAttribute("href"), pageUrl) ?? pageUrl;
@@ -80,7 +104,6 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
   }
   return context;
 }
-
 
 export function elementPath(element: ParserElement): string {
   const parts: string[] = [];

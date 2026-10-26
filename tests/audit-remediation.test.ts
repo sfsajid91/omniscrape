@@ -23,7 +23,7 @@ describe("audit remediation suites", () => {
   test("Finding 3: Splits compound byline with conjunction", () => {
     const html = `<div class="byline">By John Doe and Jane Smith</div>`;
     const result = parseHtml(html, "https://example.com/story");
-    expect(result.authors.map(a => a.name)).toEqual(["John Doe", "Jane Smith"]);
+    expect(result.authors.map((a) => a.name)).toEqual(["John Doe", "Jane Smith"]);
   });
 
   test("Finding 4: Rejects prose paragraph starting with By without byline classes", () => {

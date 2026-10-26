@@ -6,18 +6,24 @@ const page = "https://publisher.example/story";
 describe("listing attribution boundaries", () => {
   test("does not promote CBC lineup story authors into page review", () => {
     const lineup = {
-      main: [{
-        type: "lineup", content: [
-          { itemType: "story", author: { name: "Card Writer One" } },
-          { itemType: "story", author: { name: "Card Writer Two" } },
-        ]
-      }]
+      main: [
+        {
+          type: "lineup",
+          content: [
+            { itemType: "story", author: { name: "Card Writer One" } },
+            { itemType: "story", author: { name: "Card Writer Two" } },
+          ],
+        },
+      ],
     };
     const cards = `<article class="river-item"><h2><a href="/first-story">A sufficiently long first story headline</a></h2></article><article class="river-item"><h2><a href="/second-story">A sufficiently long second story headline</a></h2></article>`;
     const result = parseHtml(`<script id="static-page">${JSON.stringify(lineup)}</script>${cards}`, page);
     expect(result.author.name).toBe("Unknown Author");
     expect(result.review).toEqual([]);
-    expect(result.articles.map(({ url }) => url)).toEqual(["https://publisher.example/first-story", "https://publisher.example/second-story"]);
+    expect(result.articles.map(({ url }) => url)).toEqual([
+      "https://publisher.example/first-story",
+      "https://publisher.example/second-story",
+    ]);
   });
 
   test("skips linked and unmarked bylines in separate story cards", () => {
@@ -29,14 +35,24 @@ describe("listing attribution boundaries", () => {
 
   test("treats cards, feed, and teasers as collections only with story evidence", () => {
     for (const key of ["cards", "feed", "teasers"]) {
-      const data = { [key]: [{ itemType: "story", title: "A headline", url: "/story", author: { name: "Listing Writer" } }] };
+      const data = {
+        [key]: [{ itemType: "story", title: "A headline", url: "/story", author: { name: "Listing Writer" } }],
+      };
       const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
       expect(result.author.name, key).toBe("Unknown Author");
       expect(result.review, key).toEqual([]);
     }
   });
   test("listing-card email and social links cannot leak into the target author", () => {
-    const lineup = { type: "lineup", content: [{ itemType: "story", author: { name: "Card Contact Writer", email: "card@example.org", twitter: "https://x.com/cardwriter" } }] };
+    const lineup = {
+      type: "lineup",
+      content: [
+        {
+          itemType: "story",
+          author: { name: "Card Contact Writer", email: "card@example.org", twitter: "https://x.com/cardwriter" },
+        },
+      ],
+    };
     const result = parseHtml(`<script id="static-page">${JSON.stringify(lineup)}</script>`, page);
     expect(result.author.name).toBe("Unknown Author");
     expect(result.author.email).toBeUndefined();
@@ -45,14 +61,20 @@ describe("listing attribution boundaries", () => {
   });
 
   test("keeps an explicit page author while sibling listing cards are excluded", () => {
-    const data = { author: { name: "Page Writer", id: "page-7" }, main: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Card Writer" } }] }] };
+    const data = {
+      author: { name: "Page Writer", id: "page-7" },
+      main: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Card Writer" } }] }],
+    };
     const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
     expect(result.author).toMatchObject({ name: "Page Writer", id: "page-7" });
     expect(result.review).toEqual([]);
   });
 
   test("propagates listing context through nested lineup containers", () => {
-    const data = { type: "lineup", content: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Nested Card Writer" } }] }] };
+    const data = {
+      type: "lineup",
+      content: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Nested Card Writer" } }] }],
+    };
     const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
@@ -60,19 +82,37 @@ describe("listing attribution boundaries", () => {
   });
 
   test("retains unrelated reviewer evidence without promoting it to the author", () => {
-    const ld = { "@type": "NewsArticle", url: page, author: { "@type": "Person", name: "Page Writer" }, reviewer: { "@type": "Person", name: "Independent Reviewer", email: "reviewer@example.org" } };
+    const ld = {
+      "@type": "NewsArticle",
+      url: page,
+      author: { "@type": "Person", name: "Page Writer" },
+      reviewer: { "@type": "Person", name: "Independent Reviewer", email: "reviewer@example.org" },
+    };
     const result = parseHtml(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`, page);
     expect(result.author.name).toBe("Page Writer");
-    expect(result.review.some(({ author, reason }) => author.name === "Independent Reviewer" && reason === "different_identity" && author.email === "reviewer@example.org")).toBe(true);
+    expect(
+      result.review.some(
+        ({ author, reason }) =>
+          author.name === "Independent Reviewer" &&
+          reason === "different_identity" &&
+          author.email === "reviewer@example.org",
+      ),
+    ).toBe(true);
   });
 
   test("keeps ordinary navigation links out of the DOM article set", () => {
-    const result = parseHtml(`<nav><h2><a href="/about">A sufficiently long navigation section link</a></h2></nav>`, page);
+    const result = parseHtml(
+      `<nav><h2><a href="/about">A sufficiently long navigation section link</a></h2></nav>`,
+      page,
+    );
     expect(result.articles).toEqual([]);
   });
 
   test("does not treat arbitrary generic content as a collection", () => {
-    const result = parseHtml(`<script id="static-page">${JSON.stringify({ content: [{ author: { name: "Explicit Writer", id: "writer-1" } }] })}</script>`, page);
+    const result = parseHtml(
+      `<script id="static-page">${JSON.stringify({ content: [{ author: { name: "Explicit Writer", id: "writer-1" } }] })}</script>`,
+      page,
+    );
     expect(result.author.name).toBe("Explicit Writer");
   });
 });

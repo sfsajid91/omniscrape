@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "fs";
 import { describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { parseHtml } from "../src/parse";
 
 const syntheticQuintypeHtml = `<!DOCTYPE html><html><head><script id="static-page" type="application/json">
@@ -24,7 +24,7 @@ describe("deduplication and entity correlation", () => {
     expect(result.editorial.ownerName).toBe("Ashfaq Ahmed");
 
     // Assert editorial provenance records are deduplicated
-    const editorialProvenance = result.provenance.filter(p => p.field.startsWith("editorial."));
+    const editorialProvenance = result.provenance.filter((p) => p.field.startsWith("editorial."));
     expect(editorialProvenance.length).toBeLessThanOrEqual(5); // At most 1 record per distinct field
   });
 
@@ -39,7 +39,7 @@ describe("deduplication and entity correlation", () => {
     expect(result.editorial.ownerEmail).toBe("aahmed@gulfnews.com");
     expect(result.editorial.ownerName).toBe("Ashfaq Ahmed");
 
-    const editorialProvenance = result.provenance.filter(p => p.field.startsWith("editorial."));
+    const editorialProvenance = result.provenance.filter((p) => p.field.startsWith("editorial."));
     expect(editorialProvenance.length).toBeLessThanOrEqual(5);
   });
 });

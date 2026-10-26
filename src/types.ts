@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-export const HttpUrlSchema = z.string().url().refine(
-  (value) => /^https?:\/\//i.test(value),
-  "Expected an HTTP(S) URL",
-);
+export const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), "Expected an HTTP(S) URL");
 
 export const SocialPlatformSchema = z.enum([
   "linkedin",

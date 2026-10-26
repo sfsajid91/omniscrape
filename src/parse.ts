@@ -1,9 +1,9 @@
 import { parseHTML } from "linkedom";
 import { createPageContext, DEFAULT_LIMITS, type ExtractionLimits } from "./core/context";
+import { resolveParserOutput } from "./core/resolver";
 import { extractDomAndMeta } from "./extractors/dom-meta";
 import { extractHydrationData } from "./extractors/hydration";
 import { extractJsonLd } from "./extractors/json-ld";
-import { resolveParserOutput } from "./core/resolver";
 import { detectTechStack } from "./tech-detector";
 import type { ParserOutput } from "./types";
 import { httpUrl } from "./values";

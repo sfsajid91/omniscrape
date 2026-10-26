@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
-import { parseHtml } from "../src/index";
 import { testCases } from "../scripts/cases";
+import { parseHtml } from "../src/index";
 
 describe("scripted report cases", () => {
   for (const tc of testCases) {

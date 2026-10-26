@@ -5,14 +5,22 @@ import { isRecord } from "../../values";
 export function decodeNuxt3(serialized: string, context: PageContext, path: string): unknown {
   try {
     const graph: unknown = JSON.parse(serialized);
-    if (!Array.isArray(graph) || graph.length > context.limits.maxDecodeNodes || !nuxtGraphWithinLimits(graph, context)) {
+    if (
+      !Array.isArray(graph) ||
+      graph.length > context.limits.maxDecodeNodes ||
+      !nuxtGraphWithinLimits(graph, context)
+    ) {
       throw new Error("Nuxt graph limit");
     }
     const unwrapEmptyRef = (value: unknown): unknown => {
       if (value === "_") return undefined;
       if (value === "0n") return 0n;
       if (typeof value !== "string") return value;
-      try { return JSON.parse(value); } catch { return value; }
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
     };
     const revivers = {
       Reactive: (value: unknown) => value,
@@ -38,7 +46,8 @@ export function nuxtGraphWithinLimits(graph: unknown[], context: PageContext): b
   let count = 0;
   while (pending.length) {
     const current = pending.pop()!;
-    if (current.index < 0 || current.index >= graph.length || current.depth > context.limits.maxDecodeDepth) return false;
+    if (current.index < 0 || current.index >= graph.length || current.depth > context.limits.maxDecodeDepth)
+      return false;
     if (++count > context.limits.maxDecodeNodes) return false;
     if (visited.has(current.index)) continue;
     visited.add(current.index);
@@ -50,9 +59,13 @@ export function nuxtGraphWithinLimits(graph: unknown[], context: PageContext): b
       let step = 1;
       let end = value.length;
       if (tag === "Set" || tag === "Map") start = 1;
-      else if (tag === "null") { start = 2; step = 2; }
-      else if (tag) { start = 1; end = Math.min(2, value.length); }
-      else if (value[0] === -7) {
+      else if (tag === "null") {
+        start = 2;
+        step = 2;
+      } else if (tag) {
+        start = 1;
+        end = Math.min(2, value.length);
+      } else if (value[0] === -7) {
         // devalue sparse array: [-7, length, index, reference, ...].
         if (!Number.isSafeInteger(value[1]) || Number(value[1]) > context.limits.maxDecodeNodes) return false;
         start = 3;
@@ -66,7 +79,8 @@ export function nuxtGraphWithinLimits(graph: unknown[], context: PageContext): b
       }
     } else if (isRecord(value)) {
       for (const item of Object.values(value)) {
-        if (typeof item === "number" && Number.isInteger(item) && item >= 0) pending.push({ index: item, depth: current.depth + 1 });
+        if (typeof item === "number" && Number.isInteger(item) && item >= 0)
+          pending.push({ index: item, depth: current.depth + 1 });
       }
     }
   }

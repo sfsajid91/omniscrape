@@ -4,9 +4,12 @@ export interface PublisherCase {
   html: string;
 }
 
-const cards = (count: number) => Array.from({ length: count }, (_, index) =>
-  `<article class="river-item"><h2><a href="/world/story-${index + 1}">World headline number ${index + 1} reports on a significant local development</a></h2></article>`,
-).join("");
+const cards = (count: number) =>
+  Array.from(
+    { length: count },
+    (_, index) =>
+      `<article class="river-item"><h2><a href="/world/story-${index + 1}">World headline number ${index + 1} reports on a significant local development</a></h2></article>`,
+  ).join("");
 
 export const publisherCases: readonly PublisherCase[] = [
   {
