@@ -1,6 +1,6 @@
 {
   "name": "@sfsajid91/omniscrape",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "HTML metadata and author parser with source-aware JSON-LD, DOM, and hydration extraction",
   "homepage": "https://github.com/sfsajid91/omniscrape#readme",
   "repository": {
@@ -26,6 +26,7 @@
     "dist",
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

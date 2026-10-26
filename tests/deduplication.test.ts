@@ -42,4 +42,40 @@ describe("deduplication and entity correlation", () => {
     const editorialProvenance = result.provenance.filter((p) => p.field.startsWith("editorial."));
     expect(editorialProvenance.length).toBeLessThanOrEqual(5);
   });
+
+  test("Quintype correlation respects maxDecodeNodes budget", () => {
+    const result = parseHtml({
+      html: syntheticQuintypeHtml,
+      pageUrl: "https://gulfnews.com/author/a-ahmed",
+      maxDecodeNodes: 1,
+    });
+    // With budget 1 node, correlation terminates early and doesn't reach nested card authors
+    expect(result.author.emails).toBeUndefined();
+  });
+
+  test("Quintype correlation preserves root author profileUrl and slug identity", () => {
+    const html = `<!DOCTYPE html><html><head><script id="static-page" type="application/json">
+    {"qt":{"data":{"author":{"id":2345930,"name":"A Ahmed","url":"https://gulfnews.com/authors/a-ahmed","slug":"a-ahmed"},"authorCollection":{"items":[
+      {"story":{"cards":[{"story-elements":[{"metadata":{"linked-story":{"authors":[
+        {"id":2345930,"name":"A Ahmed","email":"aahmedreporter@gulfnews.com"}
+      ]}}}]}]}}
+    ]}}}}
+    </script></head><body></body></html>`;
+    const result = parseHtml({ html, pageUrl: "https://gulfnews.com/authors/a-ahmed" });
+    expect(result.author.name).toBe("A Ahmed");
+    expect(result.author.slug).toBe("a-ahmed");
+    expect(result.author.emails).toContain("aahmedreporter@gulfnews.com");
+  });
+
+  test("unlinked non-primary candidate does not merge non-name attributes into resolved author", () => {
+    // If a primary author has explicit identity, and a secondary candidate has the same name but is not primary
+    const html = `
+      <script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","author":{"@type":"Person","@id":"https://example.com/author/john","name":"John Doe"}}</script>
+      <div class="related-story"><span class="byline">By John Doe</span><a href="mailto:fake-john@example.com">email</a></div>
+    `;
+    const result = parseHtml({ html, pageUrl: "https://example.com/story" });
+    expect(result.author.name).toBe("John Doe");
+    // fake-john email from unlinked related story candidate must not merge into author
+    expect(result.author.email).toBeUndefined();
+  });
 });

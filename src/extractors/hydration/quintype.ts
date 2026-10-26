@@ -1,6 +1,6 @@
 import type { PageContext } from "../../core/context";
 import type { ExtractedData, ValueEvidence } from "../../core/evidence";
-import { emailAddress, isRecord, personName } from "../../values";
+import { emailAddress, httpUrl, isRecord, personName, text } from "../../values";
 
 export function publisherNamespace(context: PageContext): string {
   try {
@@ -44,6 +44,21 @@ export function correlateQuintypeCollectionEntities(
   const authorId = authorObj ? authorObj.id : undefined;
   const authorName = authorObj ? personName(authorObj.name ?? authorObj["author-name"]) : undefined;
 
+  const explicitUrl = authorObj
+    ? [authorObj.profileUrl, authorObj.url, authorObj["author-url"]]
+        .map((v) => httpUrl(v, context.baseUrl))
+        .find(Boolean)
+    : undefined;
+  let rootSlug = authorObj ? text(authorObj.slug) : undefined;
+  if (!rootSlug && explicitUrl) {
+    try {
+      rootSlug = new URL(explicitUrl).pathname.split("/").filter(Boolean).at(-1);
+    } catch {}
+  }
+  const rootIdentity =
+    explicitUrl ??
+    (authorId !== undefined ? `${sourceName}@${publisherNamespace(context)}:${String(authorId)}` : undefined);
+
   const collection = isRecord(root.authorCollection)
     ? root.authorCollection
     : isRecord(root.collection)
@@ -53,8 +68,13 @@ export function correlateQuintypeCollectionEntities(
 
   const seenAuthorEmails = new Set<string>();
   const seenOwnerEmails = new Set<string>();
+  let visitedNodes = 0;
+  const maxNodes = context.limits.maxDecodeNodes;
+  const maxDepth = context.limits.maxDecodeDepth;
+  if (maxDepth < 2) return;
 
   for (const [itemIndex, item] of collection.items.entries()) {
+    if (++visitedNodes > maxNodes) break;
     if (!isRecord(item)) continue;
     const story = isRecord(item.story) ? item.story : undefined;
     if (!story) continue;
@@ -65,18 +85,22 @@ export function correlateQuintypeCollectionEntities(
 
     if (Array.isArray(story.authors)) {
       for (const [aIdx, a] of story.authors.entries()) {
+        if (++visitedNodes > maxNodes) break;
         if (isRecord(a)) candidatesToCheck.push({ author: a, path: `${itemPath}.authors[${aIdx}]` });
       }
     }
 
-    if (Array.isArray(story.cards)) {
+    if (maxDepth >= 4 && Array.isArray(story.cards)) {
       for (const [cIdx, card] of story.cards.entries()) {
+        if (++visitedNodes > maxNodes) break;
         if (!isRecord(card) || !Array.isArray(card["story-elements"])) continue;
         for (const [eIdx, el] of card["story-elements"].entries()) {
+          if (++visitedNodes > maxNodes) break;
           if (!isRecord(el) || !isRecord(el.metadata)) continue;
           const linkedStory = el.metadata["linked-story"];
           if (isRecord(linkedStory) && Array.isArray(linkedStory.authors)) {
             for (const [laIdx, la] of linkedStory.authors.entries()) {
+              if (++visitedNodes > maxNodes) break;
               if (isRecord(la)) {
                 candidatesToCheck.push({
                   author: la,
@@ -100,11 +124,12 @@ export function correlateQuintypeCollectionEntities(
           const name = personName(cand.name) ?? authorName;
           if (name) {
             out.authors.push({
-              identity: `${sourceName}@${publisherNamespace(context)}:${cId}`,
+              identity: rootIdentity ?? `${sourceName}@${publisherNamespace(context)}:${cId}`,
               primary: true,
               profile: {
                 name,
                 id: typeof cId === "number" ? cId : String(cId),
+                ...(rootSlug ? { slug: rootSlug } : {}),
                 email,
                 emails: [email],
                 socials: [],

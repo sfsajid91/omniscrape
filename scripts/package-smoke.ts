@@ -32,7 +32,7 @@ try {
     assert.ok(paths.includes(required), `Missing package file: ${required}`);
   }
   assert.ok(
-    paths.every((path) => /^(?:dist\/|src\/|README\.md$|LICENSE$|package\.json$)/.test(path)),
+    paths.every((path) => /^(?:dist\/|src\/|README\.md$|CHANGELOG\.md$|LICENSE$|package\.json$)/.test(path)),
     "Unexpected package contents",
   );
   const archive = join(destination, info.filename);

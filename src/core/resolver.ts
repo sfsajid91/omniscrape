@@ -236,7 +236,7 @@ function resolveAuthor(
       matching.push(candidate);
     } else if (!candidate.identity && sameName(anchor.profile.name, candidate.profile.name)) {
       const scope = candidate.evidence.name?.scope;
-      if (scope === "byline" || scope === "profile") {
+      if (candidate.primary && (scope === "byline" || scope === "profile")) {
         matching.push(candidate);
       } else {
         const hasNonNameAttributes =

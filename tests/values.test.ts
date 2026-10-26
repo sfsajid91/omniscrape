@@ -34,6 +34,16 @@ test("social links require actual platform hosts and personal profile paths", ()
   expect(socialLink("https://threads.net/@alice", base)?.handle).toBe("alice");
   expect(socialLink("https://youtube.com/@alice", base)?.handle).toBe("alice");
   expect(socialLink("https://youtube.com/channel/UC123", base)).toMatchObject({ handle: "UC123", isPersonal: false });
+  expect(socialLink("https://alice.substack.com/", base)).toMatchObject({
+    platform: "substack",
+    handle: "alice",
+    url: "https://alice.substack.com/",
+  });
+  expect(socialLink("https://alice.medium.com/", base)).toMatchObject({
+    platform: "medium",
+    handle: "alice",
+    url: "https://alice.medium.com/",
+  });
 });
 
 test("malformed HTTP schemes are withheld while relative and protocol-relative URLs resolve", () => {

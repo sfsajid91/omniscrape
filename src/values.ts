@@ -231,6 +231,7 @@ const SOCIAL_STRATEGIES: readonly SocialPlatformStrategy[] = [
     matches: (host) => host === "substack.com" || host.endsWith(".substack.com"),
     parse: (_url, host, parts, first) => {
       if (host.endsWith(".substack.com") && host !== "substack.com") {
+        if (parts.length > 0) return undefined;
         return { platform: "substack", handle: host.slice(0, -".substack.com".length) };
       }
       if (parts.length === 1 && first.startsWith("@")) {
@@ -243,6 +244,7 @@ const SOCIAL_STRATEGIES: readonly SocialPlatformStrategy[] = [
     matches: (host) => host === "medium.com" || host.endsWith(".medium.com"),
     parse: (_url, host, parts, first) => {
       if (host.endsWith(".medium.com") && host !== "medium.com") {
+        if (parts.length > 0) return undefined;
         return { platform: "medium", handle: host.slice(0, -".medium.com".length) };
       }
       if (parts.length === 1 && first.startsWith("@")) {
@@ -259,8 +261,7 @@ export function socialLink(value: unknown, baseUrl: string): SocialLink | undefi
   const url = new URL(absolute);
   const host = url.hostname.toLowerCase().replace(/^(?:www\.|mobile\.|m\.)/, "");
   const parts = url.pathname.split("/").filter(Boolean);
-  const first = parts[0]?.toLowerCase();
-  if (!first) return undefined;
+  const first = parts[0]?.toLowerCase() ?? "";
 
   for (const strategy of SOCIAL_STRATEGIES) {
     if (!strategy.matches(host)) continue;
