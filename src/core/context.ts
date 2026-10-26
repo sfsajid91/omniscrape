@@ -3,13 +3,48 @@ import { httpUrl } from "../values";
 export type ParserDocument = Document;
 export type ParserElement = Element;
 
+/**
+ * Resource limits and safety thresholds enforced during parsing and AST traversal.
+ */
 export interface ExtractionLimits {
+  /**
+   * Maximum allowed size in bytes of the incoming HTML markup string.
+   * Throws `RangeError` if the HTML byte length exceeds this limit before parsing begins.
+   *
+   * @default 8388608 (8 MB)
+   */
   maxHtmlBytes: number;
+
+  /**
+   * Maximum allowed size in bytes for any individual `<script>` tag analyzed during
+   * JSON-LD or hydration payload extraction. Scripts exceeding this threshold are
+   * safely skipped without halting the parser, and recorded in `issues`.
+   *
+   * @default 2097152 (2 MB)
+   */
   maxScriptBytes: number;
+
+  /**
+   * Safety threshold for total AST and JSON nodes traversed during static hydration decoding
+   * (e.g. Next.js Flight push chunks, Nuxt devalue graphs, Quintype/Fenrir assignments).
+   * Prevents CPU exhaustion and denial-of-service from adversarial or deeply nested payloads.
+   *
+   * @default 50000
+   */
   maxDecodeNodes: number;
+
+  /**
+   * Maximum recursion and nesting depth allowed during static hydration and JSON AST traversal.
+   * Protects against stack overflows and cyclic structures.
+   *
+   * @default 128
+   */
   maxDecodeDepth: number;
 }
 
+/**
+ * Default resource and safety thresholds for {@link ExtractionLimits}.
+ */
 export const DEFAULT_LIMITS: ExtractionLimits = {
   maxHtmlBytes: 8 * 1024 * 1024,
   maxScriptBytes: 2 * 1024 * 1024,

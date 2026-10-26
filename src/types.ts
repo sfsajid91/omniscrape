@@ -22,6 +22,9 @@ export const SocialPlatformSchema = z.enum([
 ]);
 export type SocialPlatform = z.infer<typeof SocialPlatformSchema>;
 
+/**
+ * Validated social profile link associated with an author or publisher.
+ */
 export const SocialLinkSchema = z.object({
   platform: SocialPlatformSchema,
   url: HttpUrlSchema,
@@ -30,6 +33,9 @@ export const SocialLinkSchema = z.object({
 });
 export type SocialLink = z.infer<typeof SocialLinkSchema>;
 
+/**
+ * Catalogued article item from an author profile, RSS feed, or listing section.
+ */
 export const ArticleItemSchema = z.object({
   title: z.string().min(1),
   url: HttpUrlSchema,
@@ -37,6 +43,9 @@ export const ArticleItemSchema = z.object({
 });
 export type ArticleItem = z.infer<typeof ArticleItemSchema>;
 
+/**
+ * Resolved author profile identity containing bio, contact information, and social links.
+ */
 export const AuthorProfileSchema = z.object({
   name: z.string().min(1),
   givenName: z.string().optional(),
@@ -52,6 +61,9 @@ export const AuthorProfileSchema = z.object({
 });
 export type AuthorProfile = z.infer<typeof AuthorProfileSchema>;
 
+/**
+ * Editorial attribution separating publisher/editorial ownership from byline authors.
+ */
 export const EditorialInfoSchema = z.object({
   ownerName: z.string().optional(),
   ownerId: z.union([z.string(), z.number()]).optional(),
@@ -62,6 +74,9 @@ export const EditorialInfoSchema = z.object({
 });
 export type EditorialInfo = z.infer<typeof EditorialInfoSchema>;
 
+/**
+ * Detected technology stack, CMS, and hydration format signals for the page.
+ */
 export const TechStackSchema = z.object({
   framework: z.string().default("Unknown"),
   cms: z.string().default("Unknown"),
@@ -70,6 +85,9 @@ export const TechStackSchema = z.object({
 });
 export type TechStack = z.infer<typeof TechStackSchema>;
 
+/**
+ * Extracted HTML, OpenGraph, and Twitter metadata for the page.
+ */
 export const PageMetadataSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
@@ -81,6 +99,9 @@ export const PageMetadataSchema = z.object({
 });
 export type PageMetadata = z.infer<typeof PageMetadataSchema>;
 
+/**
+ * Field-level provenance tracking showing exact source, path, and confidence.
+ */
 export const ProvenanceItemSchema = z.object({
   field: z.string(),
   value: z.string(),
@@ -93,6 +114,9 @@ export const ProvenanceItemSchema = z.object({
 });
 export type ProvenanceItem = z.infer<typeof ProvenanceItemSchema>;
 
+/**
+ * Conflicting or ambiguous author identity quarantined in the review queue.
+ */
 export const ReviewAuthorSchema = z.object({
   reason: z.enum(["ambiguous_identity", "different_identity", "conflicting_value"]),
   author: AuthorProfileSchema,
@@ -100,12 +124,18 @@ export const ReviewAuthorSchema = z.object({
 });
 export type ReviewAuthor = z.infer<typeof ReviewAuthorSchema>;
 
+/**
+ * Non-fatal diagnostic issue encountered during extraction (e.g. malformed JSON-LD, oversized script).
+ */
 export const ParserIssueSchema = z.object({
   sourcePath: z.string(),
   message: z.string(),
 });
 export type ParserIssue = z.infer<typeof ParserIssueSchema>;
 
+/**
+ * Fully resolved and validated output structure returned by {@link parseHtml}.
+ */
 export const ParserOutputSchema = z.object({
   url: HttpUrlSchema,
   parsedAt: z.string(),
@@ -120,4 +150,8 @@ export const ParserOutputSchema = z.object({
   issues: z.array(ParserIssueSchema).default([]),
   rawHydration: z.unknown().optional(),
 });
+
+/**
+ * Fully resolved and validated output structure returned by {@link parseHtml}.
+ */
 export type ParserOutput = z.infer<typeof ParserOutputSchema>;
