@@ -5,7 +5,7 @@ import { parseHtml } from "../src/index";
 describe("scripted report cases", () => {
   for (const tc of testCases) {
     test(`${tc.id}: ${tc.name}`, () => {
-      const result = parseHtml(tc.html, tc.pageUrl, tc.options);
+      const result = parseHtml({ html: tc.html, pageUrl: tc.pageUrl, ...tc.options });
       tc.verify(result);
     });
   }

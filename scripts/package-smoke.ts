@@ -50,7 +50,7 @@ const html = '<script type="application/ld+json">' + JSON.stringify({
   "@type": "ProfilePage",
   mainEntity: { "@type": "Person", name: "Alice Reporter", url, email: "writer@example.org" }
 }) + '</script>';
-const result = parseHtml(html, url);
+const result = parseHtml({ html, pageUrl: url });
 assert.equal(result.author.name, "Alice Reporter");
 assert.equal(result.author.email, "writer@example.org");
 assert.deepEqual(result.authors.map(({ name }) => name), ["Alice Reporter"]);
@@ -58,8 +58,8 @@ assert.deepEqual(result.review, []);
 assert.deepEqual(result.issues, []);
 assert.ok(result.provenance.some((item) => item.field === "author.email" && item.value === "writer@example.org" && item.sourceUrl === url && item.scope === "profile"));
 assert.equal(ParserOutputSchema.parse(JSON.parse(JSON.stringify(result))).author.name, "Alice Reporter");
-assert.throws(() => parseHtml(html, "file:///profile"), TypeError);
-assert.throws(() => parseHtml(html, url, { maxHtmlBytes: 1 }), RangeError);
+assert.throws(() => parseHtml({ html, pageUrl: "file:///profile" }), TypeError);
+assert.throws(() => parseHtml({ html, pageUrl: url, maxHtmlBytes: 1 }), RangeError);
 const entrypoint = import.meta.resolve("@sfsajid91/omniscrape");
 assert.ok(entrypoint.endsWith(process.versions.bun ? "/src/index.ts" : "/dist/index.js"), entrypoint);
 console.log(JSON.stringify({ runtime: process.versions.bun ? "Bun " + process.versions.bun : "Node " + process.versions.node, entrypoint, author: result.author.name, email: result.author.email }));

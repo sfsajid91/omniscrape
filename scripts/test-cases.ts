@@ -46,7 +46,7 @@ export async function runCases(cases: readonly TestCase[] = testCases, compare =
   }
   for (const tc of cases) {
     try {
-      const result = parseHtml(tc.html, tc.pageUrl, tc.options);
+      const result = parseHtml({ html: tc.html, pageUrl: tc.pageUrl, ...tc.options });
       tc.verify(result);
       if (comparator) {
         try {

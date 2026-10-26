@@ -6,8 +6,9 @@
 ## Interface
 
 ### Public Package Exports (`src/index.ts`)
-- `parseHtml(html: string, pageUrl: string, options?: ParseOptions): ParserOutput`: Main synchronous library entrypoint parsing HTML documents and returning structured author profiles, articles, metadata, provenance, and diagnostic issues.
-- `ParseOptions`: Configuration parameters extending `ExtractionLimits` with flags like `includeRawHydration`.
+- `parseHtml(input: ParseHtmlInput): ParserOutput`: Main synchronous library entrypoint parsing HTML documents and returning structured author profiles, articles, metadata, provenance, and diagnostic issues.
+- `ParseHtmlInput`: Single configuration object interface containing required `html`, `pageUrl`, and optional `ParseOptions`.
+- `ParseOptions`: Configuration parameters extending `ExtractionLimits` with toggles like `provenanceScope`, `articleProvenanceMode`, `dedupeAuthorProvenance`, and `includeRawHydration`.
 - `ExtractionLimits`: Resource and traversal constraint interface (`maxHtmlBytes`, `maxScriptBytes`, `maxDecodeNodes`, `maxDecodeDepth`).
 - Schemas & Types (`src/types.ts`):
   - `ParserOutput`, `ParserOutputSchema`: Primary structured output contract and corresponding Zod validation schema.

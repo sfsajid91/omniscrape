@@ -15,7 +15,7 @@ const syntheticQuintypeHtml = `<!DOCTYPE html><html><head><script id="static-pag
 
 describe("deduplication and entity correlation", () => {
   test("synthetic Quintype payload eliminates duplicate editorial provenance and correlates entities", () => {
-    const result = parseHtml(syntheticQuintypeHtml, "https://gulfnews.com/author/a-ahmed");
+    const result = parseHtml({ html: syntheticQuintypeHtml, pageUrl: "https://gulfnews.com/author/a-ahmed" });
 
     // Assert contacts extracted via Quintype entity correlation
     expect(result.author.name).toBe("A Ahmed");
@@ -32,7 +32,7 @@ describe("deduplication and entity correlation", () => {
     const fixturePath = "tests/fixtures/gulfnews-author.html";
     if (!existsSync(fixturePath)) return;
     const html = readFileSync(fixturePath, "utf-8");
-    const result = parseHtml(html, "https://gulfnews.com/author/a-ahmed");
+    const result = parseHtml({ html, pageUrl: "https://gulfnews.com/author/a-ahmed" });
 
     expect(result.author.name).toBe("A Ahmed");
     expect(result.author.emails).toContain("aahmedreporter@gulfnews.com");

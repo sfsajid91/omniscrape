@@ -17,7 +17,10 @@ const flatStory = (extra: Record<string, unknown> = {}) => ({
 describe("Quintype author ownership", () => {
   test("extracts flat story author keys without borrowing story fields", () => {
     const data = { qt: { data: flatStory() } };
-    const result = parseHtml(`<script id="static-page" type="application/json">${JSON.stringify(data)}</script>`, page);
+    const result = parseHtml({
+      html: `<script id="static-page" type="application/json">${JSON.stringify(data)}</script>`,
+      pageUrl: page,
+    });
     expect(result.author).toMatchObject({ name: "Rahul Sharma", id: "rs-4040" });
     expect(result.author.slug).toBeUndefined();
     expect(result.author.bio).toBeUndefined();
@@ -39,7 +42,10 @@ describe("Quintype author ownership", () => {
   });
 
   test("accepts qtData assignment and unwraps its data root", () => {
-    const result = parseHtml(`<script>window.qtData = ${JSON.stringify({ data: flatStory() })};</script>`, page);
+    const result = parseHtml({
+      html: `<script>window.qtData = ${JSON.stringify({ data: flatStory() })};</script>`,
+      pageUrl: page,
+    });
     expect(result.author).toMatchObject({ name: "Rahul Sharma", id: "rs-4040" });
     expect(
       result.provenance.some(
@@ -55,7 +61,7 @@ describe("Quintype author ownership", () => {
   });
 
   test("accepts qt assignment and direct story root", () => {
-    const result = parseHtml(`<script>qt = ${JSON.stringify(flatStory())};</script>`, page);
+    const result = parseHtml({ html: `<script>qt = ${JSON.stringify(flatStory())};</script>`, pageUrl: page });
     expect(result.author.name).toBe("Rahul Sharma");
     expect(
       result.provenance.some(
@@ -66,10 +72,10 @@ describe("Quintype author ownership", () => {
   });
 
   test("recognizes nested Quintype author aliases and numeric zero IDs", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ data: { author: { "author-name": "Avery Reporter", author_id: 0 } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ data: { author: { "author-name": "Avery Reporter", author_id: 0 } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author).toMatchObject({ name: "Avery Reporter", id: 0 });
     expect(
       result.provenance.some(({ field, sourcePath }) => field === "author.id" && sourcePath.endsWith(".author_id")),
@@ -77,10 +83,10 @@ describe("Quintype author ownership", () => {
   });
 
   test("does not treat publisher state aliases in unrelated fields as people", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ qt: { data: { story: { id: "story-1", slug: "story", title: "A headline", "publisher-name": "Quint Media" } } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { id: "story-1", slug: "story", title: "A headline", "publisher-name": "Quint Media" } } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.editorial.publisher).toBe("Quint Media");
   });
@@ -96,10 +102,10 @@ describe("Quintype author ownership", () => {
       ["authorId", "id-camel"],
     ] as const) {
       test(`maps flat ${nameAlias} with ${idAlias} provenance`, () => {
-        const result = parseHtml(
-          `<script id="static-page">${JSON.stringify({ qt: { data: { story: { [nameAlias]: nameValue, [idAlias]: idValue } } } })}</script>`,
-          page,
-        );
+        const result = parseHtml({
+          html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { [nameAlias]: nameValue, [idAlias]: idValue } } } })}</script>`,
+          pageUrl: page,
+        });
         expect(result.author).toMatchObject({ name: nameValue, id: idValue });
         expect(
           result.provenance.some(
@@ -118,57 +124,57 @@ describe("Quintype author ownership", () => {
   test("keeps a valid flat author when the optional author ID is missing or invalid", () => {
     for (const invalidId of [undefined, {}, ""]) {
       const story = { "author-name": "Valid Writer", ...(invalidId === undefined ? {} : { "author-id": invalidId }) };
-      const result = parseHtml(
-        `<script id="static-page">${JSON.stringify({ qt: { data: { story } } })}</script>`,
-        page,
-      );
+      const result = parseHtml({
+        html: `<script id="static-page">${JSON.stringify({ qt: { data: { story } } })}</script>`,
+        pageUrl: page,
+      });
       expect(result.author.name).toBe("Valid Writer");
       expect(result.author.id).toBeUndefined();
     }
   });
 
   test("rejects author IDs without an evidenced name", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-id": "orphan-id", id: "story-id", slug: "story-slug", title: "Story title" } } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-id": "orphan-id", id: "story-id", slug: "story-slug", title: "Story title" } } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.review).toEqual([]);
   });
 
   test("preserves raw string and positive numeric IDs", () => {
     for (const id of ["writer-7", 7]) {
-      const result = parseHtml(
-        `<script id="static-page">${JSON.stringify({ qt: { data: { author: { authorName: "Nested Writer", authorId: id } } } })}</script>`,
-        page,
-      );
+      const result = parseHtml({
+        html: `<script id="static-page">${JSON.stringify({ qt: { data: { author: { authorName: "Nested Writer", authorId: id } } } })}</script>`,
+        pageUrl: page,
+      });
       expect(result.author).toMatchObject({ name: "Nested Writer", id });
     }
   });
 
   test("withholds conflicting flat aliases instead of selecting one", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-name": "First Writer", author_name: "Second Writer", "author-id": "writer-1" } } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-name": "First Writer", author_name: "Second Writer", "author-id": "writer-1" } } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.review.map(({ author }) => author.name).sort()).toEqual(["First Writer", "Second Writer"]);
   });
 
   test("does not reconcile nested and flat authors without an agreed identity", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ qt: { data: { story: { author: { name: "Nested Writer", id: "nested-1" }, "author-name": "Flat Writer", "author-id": "flat-1" } } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { author: { name: "Nested Writer", id: "nested-1" }, "author-name": "Flat Writer", "author-id": "flat-1" } } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
   });
 
   test("reports conflicting publisher names through editorial conflict handling", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-name": "Publisher Writer", "publisher-name": "First Publisher", publisher: "Second Publisher" } } } })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ qt: { data: { story: { "author-name": "Publisher Writer", "publisher-name": "First Publisher", publisher: "Second Publisher" } } } })}</script>`,
+      pageUrl: page,
+    });
     expect(result.editorial.publisher).toBeUndefined();
     expect(result.issues.some(({ message }) => message.includes("Conflicting values for editorial.publisher"))).toBe(
       true,
@@ -181,13 +187,13 @@ describe("Quintype author ownership", () => {
       main: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Card Writer" } }] }],
       session: { author: { name: "Session Writer" } },
     };
-    const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
+    const result = parseHtml({ html: `<script id="static-page">${JSON.stringify(data)}</script>`, pageUrl: page });
     expect(result.author.name).toBe("Page Writer");
     expect(result.review.some(({ author }) => ["Card Writer", "Session Writer"].includes(author.name))).toBe(false);
   });
 
   test("does not match arbitrary qt substrings as technical markers", () => {
-    const result = parseHtml(`<script>someqtData = {story:{}}</script>`, page);
+    const result = parseHtml({ html: `<script>someqtData = {story:{}}</script>`, pageUrl: page });
     expect(result.techStack.cms).not.toBe("Quintype (Bold)");
     expect(result.techStack.hydrationFormat).toBeUndefined();
   });

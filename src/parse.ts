@@ -126,7 +126,7 @@ function extractionLimits(options?: ParseOptions): ExtractionLimits {
  * Parses an HTML document and extracts structured metadata, author identities,
  * co-author attributions, article catalogs, and field-level provenance using a configuration object.
  *
- * @param input - The parsing configuration object.
+ * @param input - The parsing configuration object containing `html`, `pageUrl`, and optional parsing limits/toggles.
  * @param input.html - Raw HTML markup string to parse (document or fragment).
  * @param input.pageUrl - Final canonical HTTP(S) URL of the document (without credentials).
  * @param input.maxHtmlBytes - Maximum allowed size in bytes of the incoming HTML string. Throws `RangeError` if exceeded. Default: `8388608` (8 MB).
@@ -139,7 +139,7 @@ function extractionLimits(options?: ParseOptions): ExtractionLimits {
  * @param input.provenanceScope - Scope filter for provenance: `"all"` (all fields), `"identity"` (author/editorial/meta only), or `"none"` (disabled). Default: `"all"`.
  * @param input.dedupeAuthorProvenance - When true, suppresses redundant `authors[0].*` provenance records when there is a single author. Default: `false`.
  * @returns Fully validated {@link ParserOutput} including author, metadata, articles, and review queues.
- * @throws {TypeError} If `html` or `pageUrl` is not a string, or if `pageUrl` contains credentials or is not HTTP(S).
+ * @throws {TypeError} If `input` is not a non-null object, or if `input.html` or `input.pageUrl` is not a string, or if `pageUrl` contains credentials or is not HTTP(S).
  * @throws {RangeError} If HTML size or extraction limits exceed safe thresholds.
  *
  * @example
@@ -154,70 +154,11 @@ function extractionLimits(options?: ParseOptions): ExtractionLimits {
  * console.log(result.author.name, result.metadata.title);
  * ```
  */
-export function parseHtml(input: ParseHtmlInput): ParserOutput;
-
-/**
- * Parses an HTML document and extracts structured metadata, author identities,
- * co-author attributions, article catalogs, and field-level provenance using positional arguments.
- *
- * @param html - Raw HTML markup string to parse (document or fragment).
- * @param pageUrl - Final canonical HTTP(S) URL of the document (without credentials). Used for resolving relative URLs, publisher origin namespacing, and canonical fallback.
- * @param options - Optional resource limits, provenance switches, and debug flags.
- * @param options.maxHtmlBytes - Maximum allowed size in bytes of the incoming HTML string. Throws `RangeError` if exceeded. Default: `8388608` (8 MB).
- * @param options.maxScriptBytes - Maximum allowed size in bytes for any single `<script>` tag. Larger scripts are skipped and reported in `issues`. Default: `2097152` (2 MB).
- * @param options.maxDecodeNodes - Safety threshold for total AST/JSON nodes traversed during static hydration decoding. Default: `50000`.
- * @param options.maxDecodeDepth - Maximum recursion and nesting depth allowed during static hydration and JSON AST traversal. Default: `128`.
- * @param options.includeRawHydration - When true, attaches bounded raw hydration snapshots in `output.rawHydration`. Default: `false`.
- * @param options.includeArticleProvenance - Whether to collect provenance for catalog articles (`articles[i].*`). Setting to false slashes output size on listing pages. Default: `true`.
- * @param options.articleProvenanceMode - Granularity mode for article provenance records: `"property"` (individual fields) or `"item"` (consolidated per article). Default: `"property"`.
- * @param options.provenanceScope - Scope filter for provenance: `"all"` (all fields), `"identity"` (author/editorial/meta only), or `"none"` (disabled). Default: `"all"`.
- * @param options.dedupeAuthorProvenance - When true, suppresses redundant `authors[0].*` provenance records when there is a single author. Default: `false`.
- * @returns Fully validated {@link ParserOutput} including author, metadata, articles, and review queues.
- * @throws {TypeError} If `html` or `pageUrl` is not a string, or if `pageUrl` contains credentials or is not HTTP(S).
- * @throws {RangeError} If HTML size or extraction limits exceed safe thresholds.
- *
- * @example
- * ```ts
- * import { parseHtml } from "@sfsajid91/omniscrape";
- *
- * const result = parseHtml("<html>...</html>", "https://example.com/article", {
- *   provenanceScope: "identity",
- * });
- * console.log(result.author.name, result.metadata.title);
- * ```
- */
-export function parseHtml(html: string, pageUrl: string, options?: ParseOptions): ParserOutput;
-
-/**
- * Internal implementation for {@link parseHtml} supporting both positional and single-object argument forms.
- *
- * @param htmlOrInput - Full HTML markup string or a unified {@link ParseHtmlInput} configuration object.
- * @param maybePageUrl - Final canonical HTTP(S) URL when invoked with positional arguments.
- * @param maybeOptions - Optional resource limits and feature flags when invoked with positional arguments.
- * @returns Fully validated {@link ParserOutput}.
- * @internal
- */
-export function parseHtml(
-  htmlOrInput: string | ParseHtmlInput,
-  maybePageUrl?: string,
-  maybeOptions?: ParseOptions,
-): ParserOutput {
-  let html: string;
-  let pageUrl: string;
-  let options: ParseOptions | undefined;
-
-  if (typeof htmlOrInput === "object" && htmlOrInput !== null) {
-    html = htmlOrInput.html;
-    pageUrl = htmlOrInput.pageUrl;
-    options = htmlOrInput;
-  } else if (typeof htmlOrInput === "string") {
-    html = htmlOrInput;
-    pageUrl = maybePageUrl as string;
-    options = maybeOptions;
-  } else {
-    throw new TypeError("html must be a string or a ParseHtmlInput object");
+export function parseHtml(input: ParseHtmlInput): ParserOutput {
+  if (typeof input !== "object" || input === null) {
+    throw new TypeError("input must be a ParseHtmlInput object");
   }
-
+  const { html, pageUrl } = input;
   if (typeof html !== "string") {
     throw new TypeError("html must be a string");
   }
@@ -227,13 +168,13 @@ export function parseHtml(
 
   const url = httpUrl(pageUrl, pageUrl);
   if (!url) throw new TypeError("pageUrl must be an HTTP(S) URL without credentials");
-  const limits = extractionLimits(options);
+  const limits = extractionLimits(input);
   if (Buffer.byteLength(html) > limits.maxHtmlBytes) throw new RangeError("HTML exceeds maxHtmlBytes");
   const wrappedHtml = /<html[\s>]/i.test(html) ? html : `<html><head></head><body>${html}</body></html>`;
   const { document } = parseHTML(wrappedHtml);
   const context = createPageContext(document, html, url, limits);
   const techStack = detectTechStack(context);
-  context.includeRawHydration = options?.includeRawHydration ?? false;
+  context.includeRawHydration = input.includeRawHydration ?? false;
   const hydration = extractHydrationData(context);
   const jsonLd = extractJsonLd(context);
   const domMeta = extractDomAndMeta(context);
@@ -243,10 +184,10 @@ export function parseHtml(
     hydration,
     jsonLd,
     domMeta,
-    includeRawHydration: options?.includeRawHydration ?? false,
-    includeArticleProvenance: options?.includeArticleProvenance,
-    articleProvenanceMode: options?.articleProvenanceMode,
-    provenanceScope: options?.provenanceScope,
-    dedupeAuthorProvenance: options?.dedupeAuthorProvenance,
+    includeRawHydration: input.includeRawHydration ?? false,
+    includeArticleProvenance: input.includeArticleProvenance,
+    articleProvenanceMode: input.articleProvenanceMode,
+    provenanceScope: input.provenanceScope,
+    dedupeAuthorProvenance: input.dedupeAuthorProvenance,
   });
 }

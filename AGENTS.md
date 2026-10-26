@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Omniscrape (`@sfsajid91/omniscrape`) is a TypeScript library for extracting HTML metadata, author identities, articles, and field-level provenance from DOM/meta tags, JSON-LD, and framework hydration payloads. `parseHtml(html, pageUrl, options?)` is synchronous and zero-I/O: callers fetch HTML and supply the final response URL. Do not add fetching, browser execution, or persistence to the parser.
+Omniscrape (`@sfsajid91/omniscrape`) is a TypeScript library for extracting HTML metadata, author identities, articles, and field-level provenance from DOM/meta tags, JSON-LD, and framework hydration payloads. `parseHtml(input)` is synchronous and zero-I/O: callers fetch HTML and supply the final response URL in a single input object. Do not add fetching, browser execution, or persistence to the parser.
 
 Read `README.md` before working, then the README files for the affected areas: `src/README.md`, `src/core/README.md`, `src/extractors/README.md`, and `scripts/README.md`. Check documentation claims against current code and tests; `AUDIT_REPORT.md` contains investigations, not an authoritative implementation contract.
 

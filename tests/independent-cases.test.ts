@@ -5,7 +5,7 @@ import { independentCases as cases } from "./fixtures/independent-cases";
 describe("independent evaluation cases", () => {
   test("linked JSON-LD NewsArticle resolves author, publisher, dates, image, and canonical", () => {
     const { html, pageUrl } = cases.linkedJsonLd;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Jane Doe",
       givenName: "Jane",
@@ -53,7 +53,7 @@ describe("independent evaluation cases", () => {
 
   test("ProfilePage targets its Person and preserves profile provenance", () => {
     const { html, pageUrl } = cases.profilePage;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Sofia Marino",
       slug: "sofia-marino",
@@ -73,7 +73,7 @@ describe("independent evaluation cases", () => {
 
   test("Next Pages profile preserves its short CMS article and excludes unrelated user data", () => {
     const { html, pageUrl } = cases.nextPagesProfile;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Morgan Lee",
       id: 501,
@@ -113,7 +113,7 @@ describe("independent evaluation cases", () => {
 
   test("Nuxt3 profile decodes refs and returns its exact article set", () => {
     const { html, pageUrl } = cases.nuxt3Profile;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Priya Nair",
       id: 88,
@@ -154,7 +154,7 @@ describe("independent evaluation cases", () => {
 
   test("Quintype author collection retains editorial owner and valid stories only", () => {
     const { html, pageUrl } = cases.quintypeCollection;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Ada Writer",
       id: 12,
@@ -185,7 +185,7 @@ describe("independent evaluation cases", () => {
 
   test("Fusion assignment extracts the author, social link, and article", () => {
     const { html, pageUrl } = cases.fusionAssignment;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Ravi Shah",
       id: "r-9",
@@ -207,7 +207,7 @@ describe("independent evaluation cases", () => {
 
   test("DOM byline and metadata exclude navigation/footer while retaining article cards", () => {
     const { html, pageUrl } = cases.domBylineAndMetadata;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Dana Kim",
       slug: "dana-kim",
@@ -235,7 +235,7 @@ describe("independent evaluation cases", () => {
 
   test("scoped DOM profile preserves profile fields and ordered article list", () => {
     const { html, pageUrl } = cases.domProfile;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({
       name: "Carla Writer",
       slug: "carla-writer",
@@ -263,7 +263,7 @@ describe("independent evaluation cases", () => {
 
   test("two current-article authors remain ambiguous with exact review identities", () => {
     const { html, pageUrl } = cases.multipleArticleAuthors;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toEqual({ name: "Unknown Author", socials: [] });
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Editor"]);
     expect(result.review.map(({ reason, author }) => ({ reason, name: author.name }))).toEqual([
@@ -289,7 +289,7 @@ describe("independent evaluation cases", () => {
 
   test("same-identity conflicting email is withheld and both variants remain reviewable", () => {
     const { html, pageUrl } = cases.conflictingEmail;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({ name: "Alice Reporter", id: 7, slug: "alice" });
     expect(result.author.email).toBeUndefined();
     expect(
@@ -308,7 +308,7 @@ describe("independent evaluation cases", () => {
 
   test("malformed JSON-LD and Nuxt sources do not suppress later state, metadata, or articles", () => {
     const { html, pageUrl } = cases.malformedSources;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author.name).toBe("Later Writer");
     expect(result.author.id).toBe("w-1");
     expect(result.issues).toContainEqual({ sourcePath: "script[0]", message: "Malformed JSON-LD" });
@@ -327,18 +327,18 @@ describe("independent evaluation cases", () => {
 
   test("resource limits reject oversized scripts and preserve independent meta evidence", () => {
     const { html, pageUrl, options } = cases.resourceLimits;
-    const result = parseHtml(html, pageUrl, options);
+    const result = parseHtml({ html, pageUrl, ...options });
     expect(result.author).toEqual({ name: "Meta Writer", socials: [] });
     expect(result.issues).toContainEqual({ sourcePath: "script[0]", message: "Script exceeds maxScriptBytes" });
     expect(result.rawHydration).toBeUndefined();
-    expect(() => parseHtml("ééé", pageUrl, { maxHtmlBytes: 5 })).toThrow(RangeError);
-    expect(() => parseHtml("", pageUrl, { maxDecodeDepth: 0 })).toThrow(RangeError);
-    expect(() => parseHtml("", "javascript:alert(1)")).toThrow(TypeError);
+    expect(() => parseHtml({ html: "ééé", pageUrl, maxHtmlBytes: 5 })).toThrow(RangeError);
+    expect(() => parseHtml({ html: "", pageUrl, maxDecodeDepth: 0 })).toThrow(RangeError);
+    expect(() => parseHtml({ html: "", pageUrl: "javascript:alert(1)" })).toThrow(TypeError);
   });
 
   test("URL-valued article author is not a name and linked byline remains authoritative", () => {
     const { html, pageUrl } = cases.urlArticleAuthor;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toMatchObject({ name: "Alice Reporter" });
     expect(result.author.name).not.toContain("facebook.com");
     expect(result.author.socials.map(({ platform, handle }) => ({ platform, handle }))).toEqual([
@@ -355,8 +355,8 @@ describe("independent evaluation cases", () => {
 
   test("raw hydration is bounded, JSON-safe, opt-in, and does not alter resolved output", () => {
     const { html, pageUrl } = cases.rawHydration;
-    const ordinary = parseHtml(html, pageUrl);
-    const included = parseHtml(html, pageUrl, { includeRawHydration: true });
+    const ordinary = parseHtml({ html, pageUrl });
+    const included = parseHtml({ html, pageUrl, includeRawHydration: true });
     expect(ordinary.rawHydration).toBeUndefined();
     expect(included.author).toEqual(ordinary.author);
     expect(included.author).toMatchObject({ name: "Raw Writer", id: 1 });
@@ -369,13 +369,13 @@ describe("independent evaluation cases", () => {
     ]);
     expect(() => JSON.stringify(included.rawHydration)).not.toThrow();
     expect(JSON.stringify(included.rawHydration)).toContain("Raw Writer");
-    const bounded = parseHtml(html, pageUrl, { includeRawHydration: true, maxDecodeNodes: 2 });
+    const bounded = parseHtml({ html, pageUrl, includeRawHydration: true, maxDecodeNodes: 2 });
     expect(JSON.stringify(bounded.rawHydration)).toContain("[Truncated]");
   });
 
   test("empty document uses requested URL as canonical with no inferred author or articles", () => {
     const { html, pageUrl } = cases.emptyDocument;
-    const result = parseHtml(html, pageUrl);
+    const result = parseHtml({ html, pageUrl });
     expect(result.author).toEqual({ name: "Unknown Author", socials: [] });
     expect(result.authors).toEqual([]);
     expect(result.metadata).toEqual({ canonicalUrl: "https://example.com/empty" });

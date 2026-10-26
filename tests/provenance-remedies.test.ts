@@ -27,7 +27,7 @@ const sampleHtml = `<!DOCTYPE html>
 
 describe("provenance payload optimization remedies", () => {
   test("default behavior retains full property-level article provenance and author mirror", () => {
-    const result = parseHtml(sampleHtml, "https://news.example/author/jane");
+    const result = parseHtml({ html: sampleHtml, pageUrl: "https://news.example/author/jane" });
 
     expect(result.author.name).toBe("Jane Journalist");
     expect(result.articles).toHaveLength(2);
@@ -106,7 +106,7 @@ describe("provenance payload optimization remedies", () => {
     const html = readFileSync(fixturePath, "utf-8");
 
     // Mode 1: Default (full property-level)
-    const defaultRes = parseHtml(html, "https://gulfnews.com/author/a-ahmed");
+    const defaultRes = parseHtml({ html, pageUrl: "https://gulfnews.com/author/a-ahmed" });
     const defaultSize = JSON.stringify(defaultRes.provenance).length;
 
     // Mode 2: Item-level article mode

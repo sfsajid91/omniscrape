@@ -17,7 +17,10 @@ describe("listing attribution boundaries", () => {
       ],
     };
     const cards = `<article class="river-item"><h2><a href="/first-story">A sufficiently long first story headline</a></h2></article><article class="river-item"><h2><a href="/second-story">A sufficiently long second story headline</a></h2></article>`;
-    const result = parseHtml(`<script id="static-page">${JSON.stringify(lineup)}</script>${cards}`, page);
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify(lineup)}</script>${cards}`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.review).toEqual([]);
     expect(result.articles.map(({ url }) => url)).toEqual([
@@ -28,7 +31,7 @@ describe("listing attribution boundaries", () => {
 
   test("skips linked and unmarked bylines in separate story cards", () => {
     const html = `<article class="river-item"><h2><a href="/recommended">A sufficiently long recommended story headline</a></h2><div class="byline"><a href="/authors/recommender">By Card Recommender</a> and <a href="/authors/other">Other Card Writer</a></div><p>By <a href="/authors/linked-card-writer">Linked Card Writer</a></p></article><article><h1><a href="/story">Current story heading</a></h1><div class="byline">By Page Writer</div></article>`;
-    const result = parseHtml(html, page);
+    const result = parseHtml({ html, pageUrl: page });
     expect(result.author.name).toBe("Page Writer");
     expect(result.review).toEqual([]);
   });
@@ -38,7 +41,7 @@ describe("listing attribution boundaries", () => {
       const data = {
         [key]: [{ itemType: "story", title: "A headline", url: "/story", author: { name: "Listing Writer" } }],
       };
-      const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
+      const result = parseHtml({ html: `<script id="static-page">${JSON.stringify(data)}</script>`, pageUrl: page });
       expect(result.author.name, key).toBe("Unknown Author");
       expect(result.review, key).toEqual([]);
     }
@@ -53,7 +56,7 @@ describe("listing attribution boundaries", () => {
         },
       ],
     };
-    const result = parseHtml(`<script id="static-page">${JSON.stringify(lineup)}</script>`, page);
+    const result = parseHtml({ html: `<script id="static-page">${JSON.stringify(lineup)}</script>`, pageUrl: page });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.author.email).toBeUndefined();
     expect(result.author.socials).toEqual([]);
@@ -65,7 +68,7 @@ describe("listing attribution boundaries", () => {
       author: { name: "Page Writer", id: "page-7" },
       main: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Card Writer" } }] }],
     };
-    const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
+    const result = parseHtml({ html: `<script id="static-page">${JSON.stringify(data)}</script>`, pageUrl: page });
     expect(result.author).toMatchObject({ name: "Page Writer", id: "page-7" });
     expect(result.review).toEqual([]);
   });
@@ -75,7 +78,7 @@ describe("listing attribution boundaries", () => {
       type: "lineup",
       content: [{ type: "lineup", content: [{ itemType: "story", author: { name: "Nested Card Writer" } }] }],
     };
-    const result = parseHtml(`<script id="static-page">${JSON.stringify(data)}</script>`, page);
+    const result = parseHtml({ html: `<script id="static-page">${JSON.stringify(data)}</script>`, pageUrl: page });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
     expect(result.review).toEqual([]);
@@ -88,7 +91,10 @@ describe("listing attribution boundaries", () => {
       author: { "@type": "Person", name: "Page Writer" },
       reviewer: { "@type": "Person", name: "Independent Reviewer", email: "reviewer@example.org" },
     };
-    const result = parseHtml(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`, page);
+    const result = parseHtml({
+      html: `<script type="application/ld+json">${JSON.stringify(ld)}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Page Writer");
     expect(
       result.review.some(
@@ -101,18 +107,18 @@ describe("listing attribution boundaries", () => {
   });
 
   test("keeps ordinary navigation links out of the DOM article set", () => {
-    const result = parseHtml(
-      `<nav><h2><a href="/about">A sufficiently long navigation section link</a></h2></nav>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<nav><h2><a href="/about">A sufficiently long navigation section link</a></h2></nav>`,
+      pageUrl: page,
+    });
     expect(result.articles).toEqual([]);
   });
 
   test("does not treat arbitrary generic content as a collection", () => {
-    const result = parseHtml(
-      `<script id="static-page">${JSON.stringify({ content: [{ author: { name: "Explicit Writer", id: "writer-1" } }] })}</script>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<script id="static-page">${JSON.stringify({ content: [{ author: { name: "Explicit Writer", id: "writer-1" } }] })}</script>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Explicit Writer");
   });
 });

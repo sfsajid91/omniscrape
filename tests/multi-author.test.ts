@@ -8,15 +8,15 @@ const article = (authors: unknown[]) =>
 
 describe("confirmed authors array", () => {
   test("returns an empty array when no target is evidenced", () => {
-    const result = parseHtml(`<title>Story</title>`, page);
+    const result = parseHtml({ html: `<title>Story</title>`, pageUrl: page });
     expect(result.authors).toEqual([]);
   });
 
   test("mirrors a resolved single author and records indexed provenance", () => {
-    const result = parseHtml(
-      article([{ "@type": "Person", name: "Alice Reporter", url: "/authors/alice", email: "alice@example.org" }]),
-      page,
-    );
+    const result = parseHtml({
+      html: article([{ "@type": "Person", name: "Alice Reporter", url: "/authors/alice", email: "alice@example.org" }]),
+      pageUrl: page,
+    });
     expect(result.authors).toHaveLength(1);
     expect(result.authors[0]).toMatchObject({ name: "Alice Reporter", email: "alice@example.org" });
     expect(
@@ -28,27 +28,27 @@ describe("confirmed authors array", () => {
   });
 
   test("exposes only explicit current-article co-authors in source order", () => {
-    const result = parseHtml(
-      article([
+    const result = parseHtml({
+      html: article([
         { "@type": "Person", name: "Alice Reporter" },
         { "@type": "Person", name: "Bob Writer" },
       ]),
-      page,
-    );
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
     expect(result.review.map(({ author }) => author.name).sort()).toEqual(["Alice Reporter", "Bob Writer"]);
   });
 
   test("collapses duplicate explicit identities but keeps same-name distinct identities", () => {
-    const result = parseHtml(
-      article([
+    const result = parseHtml({
+      html: article([
         { "@type": "Person", name: "Alex Smith", url: "/authors/alex-one", email: "one@example.org" },
         { "@type": "Person", name: "Alex Smith", url: "/authors/alex-two", email: "two@example.org" },
         { "@type": "Person", name: "Alex Smith", url: "/authors/alex-one", email: "one@example.org" },
       ]),
-      page,
-    );
+      pageUrl: page,
+    });
     expect(result.authors.map(({ name, email }) => [name, email])).toEqual([
       ["Alex Smith", "one@example.org"],
       ["Alex Smith", "two@example.org"],
@@ -62,7 +62,7 @@ describe("confirmed authors array", () => {
         { "@type": "Person", name: "Bob Writer", url: "/authors/bob" },
       ]) +
       `<div class="byline"><a href="/authors/alice">Alice Reporter</a> and <a href="/authors/charlie">Charlie Editor</a></div>`;
-    const result = parseHtml(html, page);
+    const result = parseHtml({ html, pageUrl: page });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
   });
@@ -80,7 +80,7 @@ describe("confirmed authors array", () => {
         },
       },
     };
-    const result = parseHtml(`<script id="__NEXT_DATA__">${JSON.stringify(payload)}</script>`, page);
+    const result = parseHtml({ html: `<script id="__NEXT_DATA__">${JSON.stringify(payload)}</script>`, pageUrl: page });
     expect(result.authors.map(({ name, email }) => [name, email])).toEqual([
       ["Dana Reporter", "dana@example.org"],
       ["Eli Writer", "eli@example.org"],
@@ -112,7 +112,10 @@ describe("confirmed authors array", () => {
         { "@type": "NewsArticle", url: page, author: [{ "@id": "#alice" }, { "@id": "#bob" }] },
       ],
     };
-    const result = parseHtml(`<script type="application/ld+json">${JSON.stringify(graph)}</script>`, page);
+    const result = parseHtml({
+      html: `<script type="application/ld+json">${JSON.stringify(graph)}</script>`,
+      pageUrl: page,
+    });
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
     expect(
       result.provenance.some(
@@ -122,16 +125,16 @@ describe("confirmed authors array", () => {
   });
 
   test("forms a shared group from one explicit DOM byline container", () => {
-    const result = parseHtml(
-      `<div class="byline"><a href="/authors/alice">Alice Reporter</a> and <a href="/authors/bob">Bob Writer</a></div>`,
-      page,
-    );
+    const result = parseHtml({
+      html: `<div class="byline"><a href="/authors/alice">Alice Reporter</a> and <a href="/authors/bob">Bob Writer</a></div>`,
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
   });
 
   test("forms a shared group from a single meta-author element", () => {
-    const result = parseHtml(`<meta name="author" content="Alice Reporter and Bob Writer">`, page);
+    const result = parseHtml({ html: `<meta name="author" content="Alice Reporter and Bob Writer">`, pageUrl: page });
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
     expect(
       result.provenance.filter(({ field }) => field === "authors[0].name" || field === "authors[1].name"),
@@ -154,7 +157,10 @@ describe("confirmed authors array", () => {
         },
       ],
     };
-    const result = parseHtml(`<script type="application/ld+json">${JSON.stringify(graph)}</script>`, page);
+    const result = parseHtml({
+      html: `<script type="application/ld+json">${JSON.stringify(graph)}</script>`,
+      pageUrl: page,
+    });
     expect(result.authors.map(({ name, email }) => [name, email])).toEqual([
       ["Alice Reporter", undefined],
       ["Bob Writer", "bob@example.org"],
@@ -168,13 +174,13 @@ describe("confirmed authors array", () => {
   });
 
   test("same-name explicit identities remain separate members of a confirmed group", () => {
-    const result = parseHtml(
-      article([
+    const result = parseHtml({
+      html: article([
         { "@type": "Person", name: "Alex Smith", url: "/authors/alex-one", email: "one@example.org" },
         { "@type": "Person", name: "Alex Smith", url: "/authors/alex-two", email: "two@example.org" },
       ]),
-      page,
-    );
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors.map(({ email }) => email)).toEqual(["one@example.org", "two@example.org"]);
   });
@@ -186,14 +192,14 @@ describe("confirmed authors array", () => {
         { "@type": "Person", name: "Bob Writer", url: "/authors/bob" },
       ]) +
       `<script type="application/ld+json">${JSON.stringify({ "@type": "Person", name: "Related Person", email: "related@example.org" })}</script>`;
-    const result = parseHtml(html, page);
+    const result = parseHtml({ html, pageUrl: page });
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
     expect(result.review.some(({ author }) => author.name === "Related Person")).toBe(true);
   });
 
   test("does not infer a shared group from independent equal-ranked targets", () => {
-    const result = parseHtml(
-      `<script id="__NEXT_DATA__">${JSON.stringify({
+    const result = parseHtml({
+      html: `<script id="__NEXT_DATA__">${JSON.stringify({
         props: {
           pageProps: {
             author: { name: "Alice Reporter", url: "https://publisher.example/authors/alice" },
@@ -201,8 +207,8 @@ describe("confirmed authors array", () => {
           },
         },
       })}</script>`,
-      page,
-    );
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
   });
@@ -214,12 +220,12 @@ describe("confirmed authors array", () => {
         { "@type": "Person", name: "Bob Writer", url: "/authors/bob" },
       ]) +
       `<div class="byline"><a href="/authors/bob">Bob Writer</a> and <a href="/authors/alice">Alice Reporter</a></div>`;
-    const result = parseHtml(html, page);
+    const result = parseHtml({ html, pageUrl: page });
     expect(result.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
   });
   test("does not infer co-authorship from comment authors", () => {
-    const result = parseHtml(
-      `<script type="application/ld+json">${JSON.stringify({
+    const result = parseHtml({
+      html: `<script type="application/ld+json">${JSON.stringify({
         "@type": "NewsArticle",
         url: page,
         headline: "A story with reader responses",
@@ -233,8 +239,8 @@ describe("confirmed authors array", () => {
           },
         ],
       })}</script>`,
-      page,
-    );
+      pageUrl: page,
+    });
     expect(result.author.name).toBe("Unknown Author");
     expect(result.authors).toEqual([]);
   });

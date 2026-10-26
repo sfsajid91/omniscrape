@@ -8,7 +8,7 @@ const cases = new Map(publisherCases.map((publisherCase) => [publisherCase.id, p
 function parse(id: string) {
   const publisherCase = cases.get(id);
   if (!publisherCase) throw new Error(`Missing publisher fixture: ${id}`);
-  return parseHtml(publisherCase.html, publisherCase.pageUrl);
+  return parseHtml({ html: publisherCase.html, pageUrl: publisherCase.pageUrl });
 }
 function provenance(result: ParserOutput, prefix: string) {
   return result.provenance

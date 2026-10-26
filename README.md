@@ -34,7 +34,7 @@ const html = `<script type="application/ld+json">{
   }
 }</script>`;
 
-const result = parseHtml(html, url);
+const result = parseHtml({ html, pageUrl: url });
 
 result.author.name;  // "Alice Reporter"
 result.author.email; // "writer@example.org"
@@ -51,7 +51,7 @@ Callers fetch HTML with their own client and supply the final response URL:
 ```typescript
 const response = await fetch("https://publisher.example/authors/alice");
 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-const result = parseHtml(await response.text(), response.url);
+const result = parseHtml({ html: await response.text(), pageUrl: response.url });
 ```
 
 Network requests, redirects, timeouts, retries, and transfer limits belong entirely to the caller.
@@ -74,17 +74,23 @@ Network requests, redirects, timeouts, retries, and transfer limits belong entir
 
 ### API Specification
 
-#### `parseHtml(html, pageUrl, options?)`
+#### `parseHtml(input)`
 
-Synchronous parser returning [`ParserOutput`](./src/types.ts). `pageUrl` must be an absolute HTTP(S) URL without user credentials.
+Synchronous parser accepting a single [`ParseHtmlInput`](./src/parse.ts) configuration object and returning [`ParserOutput`](./src/types.ts). `pageUrl` must be an absolute HTTP(S) URL without user credentials.
 
-| Option | Default | Purpose |
+| Field | Default | Purpose |
 |---|---:|---|
+| `html` | *(required)* | Raw HTML string or fragment to parse |
+| `pageUrl` | *(required)* | Final canonical HTTP(S) URL of the document |
 | `maxHtmlBytes` | 8 MiB | Reject oversized HTML by UTF-8 byte length |
 | `maxScriptBytes` | 2 MiB | Skip oversized scripts and record a diagnostic issue |
 | `maxDecodeNodes` | 50,000 | Bound decoder and graph traversal operations |
 | `maxDecodeDepth` | 128 | Bound recursion depth in hydration/JSON graphs |
 | `includeRawHydration` | `false` | Include a bounded, JSON-safe diagnostic snapshot |
+| `includeArticleProvenance` | `true` | Track field-level provenance on catalog articles |
+| `articleProvenanceMode` | `"property"` | Emit property-level (`"property"`) or consolidated (`"item"`) provenance |
+| `provenanceScope` | `"all"` | Scope collection to `"all"`, `"identity"`, or `"none"` |
+| `dedupeAuthorProvenance` | `false` | Suppress redundant `authors[0].*` provenance mirrors |
 
 Numeric limit options must be positive safe integers. Invalid URLs throw `TypeError`; invalid limits and oversized HTML throw `RangeError`.
 
