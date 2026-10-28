@@ -382,7 +382,7 @@ function extractAuthors(context: PageContext): AuthorCandidate[] {
     }
     const heading = doc.querySelector("h1, h2");
     const wrapper = heading?.closest(
-      ".article-author, .author-detail, header[class*='author-page'], .author-header, .author-profile, .author-card, [itemtype*='Person' i]",
+      ".article-author, .author-detail, header[class*='author-page'], section[class*='author-page'], .author-header, .author-profile, .author-card, [itemtype*='Person' i]",
     );
     if (
       wrapper &&
@@ -418,7 +418,7 @@ function authorsFromScope(
   const archivedBioScope = scope.matches("header.contentheader--archived-bio") && profilePath;
   if (scope.matches("header.contentheader--archived-bio") && !profilePath) return [];
   const explicitProfileScope = scope.matches(
-    ".article-author, .author-detail, header[class*='author-page'], .author-card, .author-header, .author-profile, [itemtype*='Person' i]",
+    ".article-author, .author-detail, header[class*='author-page'], section[class*='author-page'], .author-card, .author-header, .author-profile, [itemtype*='Person' i]",
   );
   const profileHeading = scope.querySelector("h1") ?? (profilePath ? scope.querySelector("h2") : null);
   const pageProfileScope =
@@ -543,7 +543,9 @@ function authorsFromScope(
   }
   const authorEmails: string[] = [];
   for (const anchor of scope.querySelectorAll("a[href^='mailto:']")) {
-    if (isExcludedAttributionScope(anchor)) continue;
+    if (isExcludedAttributionScope(anchor) || isListingAttributionScope(anchor, currentUrls, context.baseUrl)) {
+      continue;
+    }
     const email = emailAddress(anchor.getAttribute("href"));
     if (!email) continue;
     if (!authorEmails.includes(email)) authorEmails.push(email);

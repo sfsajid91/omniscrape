@@ -429,7 +429,16 @@ function personCandidate(
   const role = stripHtml(entity.jobTitle);
   put("designation", role && role.length <= MAX_ROLE ? role : undefined, sourcePath("jobTitle", `${path}.jobTitle`));
   put("avatarUrl", imageUrl(entity.image, context.baseUrl), sourcePath("image", `${path}.image`));
-  put("email", emailAddress(entity.email), sourcePath("email", `${path}.email`));
+  const directEmail = emailAddress(entity.email);
+  const descriptionEmail =
+    !directEmail && primary && name && (isAuthorProfileUrl(context.pageUrl) || scope === "profile")
+      ? emailAddress(bio)
+      : undefined;
+  put(
+    "email",
+    directEmail ?? descriptionEmail,
+    directEmail ? sourcePath("email", `${path}.email`) : sourcePath("description", `${path}.description`),
+  );
   const socialValues = Array.isArray(entity.sameAs) ? entity.sameAs.slice(0, 100) : [entity.sameAs];
   const socials: NonNullable<AuthorProfile["socials"]> = [];
   const socialEvidence: ValueEvidence[] = [];
