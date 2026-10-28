@@ -58,6 +58,59 @@ describe("issue #7 author profile email extraction", () => {
     ).toBe(true);
   });
 
+  test.each([
+    ["before the address", `Questions? Write to ${bioEmail}.`],
+    ["after the address", `Write to ${bioEmail}?`],
+    ["on both sides", `Questions? Write to ${bioEmail}?`],
+    ["with HTML markup", `<p>Questions? <strong>Write to ${bioEmail}</strong>.</p>`],
+    ["with uppercase letters", "Questions? Write to AFOWLER@BUSINESSINSIDER.COM."],
+  ])("normalizes the description address with a question mark %s", (_label, description) => {
+    const result = parseHtml({ pageUrl: profileUrl, html: person({ description }) });
+
+    expect(result.author.email).toBe(bioEmail);
+    expect(result.author.emails).toEqual([bioEmail]);
+    expect(result.provenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "author.email",
+          source: "json-ld",
+          sourcePath: expect.stringMatching(/\.description$/),
+        }),
+      ]),
+    );
+    expect(result.review.filter((item) => item.reason === "conflicting_value")).toEqual([]);
+  });
+
+  test("falls back to a description when the direct Person email is invalid", () => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: person({ email: "not-an-email", description: `Questions? Email ${bioEmail}.` }),
+    });
+
+    expect(result.author.email).toBe(bioEmail);
+    expect(result.author.emails).toEqual([bioEmail]);
+    expect(result.provenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "author.email",
+          source: "json-ld",
+          sourcePath: expect.stringMatching(/\.description$/),
+        }),
+      ]),
+    );
+  });
+
+  test("does not extract a contact from a mailto query without a recipient", () => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: authorSection(`<a href="mailto:?cc=${domEmail}">Email</a>`),
+    });
+
+    expect(result.author.email).toBeUndefined();
+    expect(result.author.emails ?? []).toEqual([]);
+    expect(result.provenance.filter((item) => item.field === "author.email")).toEqual([]);
+  });
+
   test("ignores mailto query parameters when extracting profile contacts", () => {
     const result = parseHtml({
       pageUrl: profileUrl,
@@ -78,6 +131,37 @@ describe("issue #7 author profile email extraction", () => {
 
     expect(result.author.socials?.map((social) => social.url)).toContain("https://x.com/acfowler");
     expect(result.author.socials?.map((social) => social.url)).not.toContain("https://x.com/otherwriter");
+  });
+
+  test.each([
+    ["article", "<article>", "</article>"],
+    ["role article", "<div role='article'>", "</div>"],
+  ])("isolates listing contacts and socials inside %s while retaining profile contacts", (_label, open, close) => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: authorSection(
+        `<a href="mailto:${domEmail}">Email</a><a href="https://x.com/acfowler">Profile</a>${open}<h2><a href="/another-story">Another story</a></h2><a href="mailto:other@businessinsider.com">Email</a><a href="https://x.com/otherwriter">Twitter</a>${close}`,
+      ),
+    });
+
+    expect(result.author.email).toBe(domEmail);
+    expect(result.author.emails).toEqual([domEmail]);
+    expect(result.author.socials?.map((social) => social.url)).toEqual(["https://x.com/acfowler"]);
+    expect(result.provenance.filter((item) => item.field === "author.email")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ source: "dom-author" })]),
+    );
+    expect(result.review.filter((item) => item.reason === "conflicting_value")).toEqual([]);
+  });
+
+  test("does not treat an author-page section as a profile on an unrelated URL", () => {
+    const result = parseHtml({
+      pageUrl: "https://www.businessinsider.com/news",
+      html: authorSection(`<a href="mailto:${domEmail}">Email</a><a href="https://x.com/acfowler">Profile</a>`),
+    });
+
+    expect(result.author.email).toBeUndefined();
+    expect(result.author.emails ?? []).toEqual([]);
+    expect(result.author.socials ?? []).toEqual([]);
   });
 
   test("retains distinct profile addresses and quarantines the singular conflict", () => {
@@ -101,6 +185,16 @@ describe("issue #7 author profile email extraction", () => {
     expect(result.author.email).toBe("explicit@businessinsider.com");
     expect(result.author.emails).toContain("explicit@businessinsider.com");
     expect(result.author.emails).not.toContain(bioEmail);
+    expect(result.provenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "author.email",
+          source: "json-ld",
+          sourcePath: expect.stringMatching(/\.email$/),
+        }),
+      ]),
+    );
+    expect(result.review.filter((item) => item.reason === "conflicting_value")).toEqual([]);
   });
 
   test("rejects a generic newsroom contact in a Person description", () => {
