@@ -3,13 +3,48 @@ import { httpUrl } from "../values";
 export type ParserDocument = Document;
 export type ParserElement = Element;
 
+/**
+ * Resource limits and safety thresholds enforced during parsing and AST traversal.
+ */
 export interface ExtractionLimits {
+  /**
+   * Maximum allowed size in bytes of the incoming HTML markup string.
+   * Throws `RangeError` if the HTML byte length exceeds this limit before parsing begins.
+   *
+   * @default 8388608 (8 MB)
+   */
   maxHtmlBytes: number;
+
+  /**
+   * Maximum allowed size in bytes for any individual `<script>` tag analyzed during
+   * JSON-LD or hydration payload extraction. Scripts exceeding this threshold are
+   * safely skipped without halting the parser, and recorded in `issues`.
+   *
+   * @default 2097152 (2 MB)
+   */
   maxScriptBytes: number;
+
+  /**
+   * Safety threshold for total AST and JSON nodes traversed during static hydration decoding
+   * (e.g. Next.js Flight push chunks, Nuxt devalue graphs, Quintype/Fenrir assignments).
+   * Prevents CPU exhaustion and denial-of-service from adversarial or deeply nested payloads.
+   *
+   * @default 50000
+   */
   maxDecodeNodes: number;
+
+  /**
+   * Maximum recursion and nesting depth allowed during static hydration and JSON AST traversal.
+   * Protects against stack overflows and cyclic structures.
+   *
+   * @default 128
+   */
   maxDecodeDepth: number;
 }
 
+/**
+ * Default resource and safety thresholds for {@link ExtractionLimits}.
+ */
 export const DEFAULT_LIMITS: ExtractionLimits = {
   maxHtmlBytes: 8 * 1024 * 1024,
   maxScriptBytes: 2 * 1024 * 1024,
@@ -39,10 +74,25 @@ export interface PageContext {
   issues: Array<{ sourcePath: string; message: string }>;
 }
 
-export function createPageContext(document: ParserDocument, html: string, pageUrl: string, limits: ExtractionLimits): PageContext {
+export function createPageContext(
+  document: ParserDocument,
+  html: string,
+  pageUrl: string,
+  limits: ExtractionLimits,
+): PageContext {
   const context: PageContext = {
-    document, html, pageUrl, baseUrl: pageUrl, limits, includeRawHydration: false,
-    scripts: [], scriptsById: new Map(), meta: new Map(), authorMeta: [], links: [], issues: [],
+    document,
+    html,
+    pageUrl,
+    baseUrl: pageUrl,
+    limits,
+    includeRawHydration: false,
+    scripts: [],
+    scriptsById: new Map(),
+    meta: new Map(),
+    authorMeta: [],
+    links: [],
+    issues: [],
   };
   let scriptIndex = 0;
   let metaIndex = 0;
@@ -57,7 +107,12 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
         context.issues.push({ sourcePath: path, message: "Script exceeds maxScriptBytes" });
         continue;
       }
-      const script: ScriptData = { id: element.id, type: (element.getAttribute("type") ?? "").toLowerCase().trim(), text: value, path };
+      const script: ScriptData = {
+        id: element.id,
+        type: (element.getAttribute("type") ?? "").toLowerCase().trim(),
+        text: value,
+        path,
+      };
       context.scripts.push(script);
       if (script.id && !context.scriptsById.has(script.id)) context.scriptsById.set(script.id, script);
     } else if (tag === "meta") {
@@ -72,7 +127,11 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
         }
       }
     } else if (tag === "link") {
-      context.links.push({ rel: (element.getAttribute("rel") ?? "").toLowerCase(), href: element.getAttribute("href") ?? "", path: `link[${linkIndex++}]@href` });
+      context.links.push({
+        rel: (element.getAttribute("rel") ?? "").toLowerCase(),
+        href: element.getAttribute("href") ?? "",
+        path: `link[${linkIndex++}]@href`,
+      });
     } else if (!hasBase) {
       hasBase = true;
       context.baseUrl = httpUrl(element.getAttribute("href"), pageUrl) ?? pageUrl;
@@ -80,7 +139,6 @@ export function createPageContext(document: ParserDocument, html: string, pageUr
   }
   return context;
 }
-
 
 export function elementPath(element: ParserElement): string {
   const parts: string[] = [];

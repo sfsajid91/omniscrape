@@ -1,7 +1,8 @@
 import { stringify } from "devalue";
 
 const jsonLd = (value: unknown) => `<script type="application/ld+json">${JSON.stringify(value)}</script>`;
-const nextData = (value: unknown) => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(value)}</script>`;
+const nextData = (value: unknown) =>
+  `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(value)}</script>`;
 
 export const independentCases = {
   linkedJsonLd: {
@@ -14,46 +15,128 @@ export const independentCases = {
       <meta property="article:modified_time" content="2025-03-05T08:00:00.000Z">
       <link rel="canonical" href="https://news.example/politics/city-budget/">
       ${jsonLd({
-      "@context": "https://schema.org", "@graph": [
-        { "@type": "NewsArticle", "@id": "https://news.example/politics/city-budget#article", url: "https://news.example/politics/city-budget", headline: "City budget passes after long debate", datePublished: "2025-03-04T10:30:00.000Z", dateModified: "2025-03-05T08:00:00.000Z", author: { "@id": "#jane", "@type": "Person" }, publisher: { "@type": "NewsMediaOrganization", name: "Example News" } },
-        { "@id": "#jane", "@type": "Person", name: "Jane Doe", givenName: "Jane", familyName: "Doe", url: "https://news.example/authors/jane-doe", jobTitle: "City Hall reporter", description: "Jane Doe covers city government and public finance.", image: { "@type": "ImageObject", contentUrl: "/images/jane.jpg" }, email: "mailto:Jane.Doe@News.Example", sameAs: ["https://www.linkedin.com/in/janedoe/?share=1", "https://twitter.com/janedoe"] },
-      ]
-    })}
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "NewsArticle",
+            "@id": "https://news.example/politics/city-budget#article",
+            url: "https://news.example/politics/city-budget",
+            headline: "City budget passes after long debate",
+            datePublished: "2025-03-04T10:30:00.000Z",
+            dateModified: "2025-03-05T08:00:00.000Z",
+            author: { "@id": "#jane", "@type": "Person" },
+            publisher: { "@type": "NewsMediaOrganization", name: "Example News" },
+          },
+          {
+            "@id": "#jane",
+            "@type": "Person",
+            name: "Jane Doe",
+            givenName: "Jane",
+            familyName: "Doe",
+            url: "https://news.example/authors/jane-doe",
+            jobTitle: "City Hall reporter",
+            description: "Jane Doe covers city government and public finance.",
+            image: { "@type": "ImageObject", contentUrl: "/images/jane.jpg" },
+            email: "mailto:Jane.Doe@News.Example",
+            sameAs: ["https://www.linkedin.com/in/janedoe/?share=1", "https://twitter.com/janedoe"],
+          },
+        ],
+      })}
       </head><body><main><article><h1>City budget passes after long debate</h1><p>Story body.</p></article></main></body></html>`,
   },
   profilePage: {
     pageUrl: "https://mag.example/people/sofia-marino",
-    html: jsonLd({ "@context": "https://schema.org", "@type": "ProfilePage", mainEntity: { "@type": "Person", name: "Sofia Marino", url: "https://mag.example/people/sofia-marino", email: "sofia@mag.example", description: "Sofia Marino writes about architecture and urban design.", jobTitle: "Design critic", sameAs: ["https://www.instagram.com/sofiamarino"] } }),
+    html: jsonLd({
+      "@context": "https://schema.org",
+      "@type": "ProfilePage",
+      mainEntity: {
+        "@type": "Person",
+        name: "Sofia Marino",
+        url: "https://mag.example/people/sofia-marino",
+        email: "sofia@mag.example",
+        description: "Sofia Marino writes about architecture and urban design.",
+        jobTitle: "Design critic",
+        sameAs: ["https://www.instagram.com/sofiamarino"],
+      },
+    }),
   },
   nextPagesProfile: {
     pageUrl: "https://example.com/authors/morgan-lee",
     html: nextData({
       props: {
         pageProps: {
-          author: { id: 501, name: "Morgan Lee", slug: "morgan-lee", role: "Investigative Reporter", bio: "Morgan Lee investigates housing and labor policy across the region.", image: { contentUrl: "/people/morgan.jpg" }, email: "morgan@example.com", twitter: "https://x.com/morganlee" },
-          articles: [{ title: "Housing audit finds gaps", slug: "/investigations/housing-audit", date: "2025-01-15" }, { title: "Short", slug: "/x" }, { title: "Labor board complaint", url: "https://example.com/labor-complaint", publishedAt: "2025-02-20T09:00:00Z" }],
+          author: {
+            id: 501,
+            name: "Morgan Lee",
+            slug: "morgan-lee",
+            role: "Investigative Reporter",
+            bio: "Morgan Lee investigates housing and labor policy across the region.",
+            image: { contentUrl: "/people/morgan.jpg" },
+            email: "morgan@example.com",
+            twitter: "https://x.com/morganlee",
+          },
+          articles: [
+            { title: "Housing audit finds gaps", slug: "/investigations/housing-audit", date: "2025-01-15" },
+            { title: "Short", slug: "/x" },
+            {
+              title: "Labor board complaint",
+              url: "https://example.com/labor-complaint",
+              publishedAt: "2025-02-20T09:00:00Z",
+            },
+          ],
           currentUser: { name: "Signed In Reader", email: "reader@example.com" },
-        }
-      }
+        },
+      },
     }),
   },
   nuxt3Profile: {
     pageUrl: "https://example.org/authors/priya-nair",
-    html: `<script id="__NUXT_DATA__" type="application/json">${stringify({ data: { author: { id: 88, name: "Priya Nair", slug: "priya-nair", jobTitle: "Climate correspondent", description: "Priya Nair reports on climate adaptation and energy policy.", image: { url: "/img/priya.png" }, socialLinks: { linkedin: "https://www.linkedin.com/in/priyanair", email: "priya@example.org" } }, articles: [{ title: "Coastal cities adapt to heat", slug: "/climate/coastal-cities", publishedAt: "2025-04-01" }, { title: "Grid upgrades accelerate", url: "/energy/grid-upgrades", date: "2025-04-02T12:00:00Z" }] } })}</script>`,
+    html: `<script id="__NUXT_DATA__" type="application/json">${stringify({
+      data: {
+        author: {
+          id: 88,
+          name: "Priya Nair",
+          slug: "priya-nair",
+          jobTitle: "Climate correspondent",
+          description: "Priya Nair reports on climate adaptation and energy policy.",
+          image: { url: "/img/priya.png" },
+          socialLinks: { linkedin: "https://www.linkedin.com/in/priyanair", email: "priya@example.org" },
+        },
+        articles: [
+          { title: "Coastal cities adapt to heat", slug: "/climate/coastal-cities", publishedAt: "2025-04-01" },
+          { title: "Grid upgrades accelerate", url: "/energy/grid-upgrades", date: "2025-04-02T12:00:00Z" },
+        ],
+      },
+    })}</script>`,
   },
   quintypeCollection: {
     pageUrl: "https://example.com/author/ada-writer",
     html: `<script id="static-page" type="application/json">${JSON.stringify({
       qt: {
         data: {
-          author: { id: 12, name: "Ada Writer", bio: "Ada Writer reports on state politics and elections.", "avatar-url": { url: "/ada.jpg" } }, authorCollection: {
+          author: {
+            id: 12,
+            name: "Ada Writer",
+            bio: "Ada Writer reports on state politics and elections.",
+            "avatar-url": { url: "/ada.jpg" },
+          },
+          authorCollection: {
             items: [
-              { story: { headline: "Budget fight heads to court", slug: "news/budget-fight", "first-published-at": "2024-05-01T00:00:00Z", "owner-name": "Desk One", "owner-id": 77 } },
-              { story: { headline: "Election recount expands", url: "https://example.com/news/recount" } }, { story: { headline: "No route here" } },
-            ]
-          }
-        }
-      }
+              {
+                story: {
+                  headline: "Budget fight heads to court",
+                  slug: "news/budget-fight",
+                  "first-published-at": "2024-05-01T00:00:00Z",
+                  "owner-name": "Desk One",
+                  "owner-id": 77,
+                },
+              },
+              { story: { headline: "Election recount expands", url: "https://example.com/news/recount" } },
+              { story: { headline: "No route here" } },
+            ],
+          },
+        },
+      },
     })}</script>`,
   },
   fusionAssignment: {
@@ -70,7 +153,16 @@ export const independentCases = {
   },
   multipleArticleAuthors: {
     pageUrl: "https://example.com/investigations/procurement",
-    html: jsonLd({ "@type": "NewsArticle", headline: "A joint investigation into procurement", url: "https://example.com/investigations/procurement", author: [{ "@type": "Person", name: "Alice Reporter", url: "/authors/alice" }, { "@type": "Person", name: "Bob Editor", url: "/authors/bob" }], datePublished: "2025-02-02T00:00:00Z" }),
+    html: jsonLd({
+      "@type": "NewsArticle",
+      headline: "A joint investigation into procurement",
+      url: "https://example.com/investigations/procurement",
+      author: [
+        { "@type": "Person", name: "Alice Reporter", url: "/authors/alice" },
+        { "@type": "Person", name: "Bob Editor", url: "/authors/bob" },
+      ],
+      datePublished: "2025-02-02T00:00:00Z",
+    }),
   },
   conflictingEmail: {
     pageUrl: "https://example.com/authors/alice",

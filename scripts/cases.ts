@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import type { ParseOptions } from "../src/parse";
 import type { ParserOutput } from "../src/types";
 
-
 export interface TestCase {
   id: string;
   name: string;
@@ -19,12 +18,12 @@ export interface TestCase {
   };
 }
 
-
-const flightPayload = [
-  '0:{"author":"$1","publishedAt":"2026-10-20T14:30:00Z","articles":["$2"]}',
-  '1:{"name":"Elena Rostova","slug":"elena-rostova","bio":"Senior AI & Tech Reporter at The Chronicle.","email":"elena@thechronicle.tech","avatar":"https://thechronicle.tech/avatars/elena.jpg","sameAs":["https://twitter.com/erostova","https://linkedin.com/in/elena-rostova"]}',
-  '2:{"title":"How Large Models Plan","url":"https://thechronicle.tech/posts/how-models-plan","publishedAt":"2026-09-15T10:00:00Z"}'
-].join("\n") + "\n";
+const flightPayload =
+  [
+    '0:{"author":"$1","publishedAt":"2026-10-20T14:30:00Z","articles":["$2"]}',
+    '1:{"name":"Elena Rostova","slug":"elena-rostova","bio":"Senior AI & Tech Reporter at The Chronicle.","email":"elena@thechronicle.tech","avatar":"https://thechronicle.tech/avatars/elena.jpg","sameAs":["https://twitter.com/erostova","https://linkedin.com/in/elena-rostova"]}',
+    '2:{"title":"How Large Models Plan","url":"https://thechronicle.tech/posts/how-models-plan","publishedAt":"2026-09-15T10:00:00Z"}',
+  ].join("\n") + "\n";
 
 const caseData: Omit<TestCase, "verify">[] = [
   // -------------------------------------------------------------------------
@@ -33,7 +32,8 @@ const caseData: Omit<TestCase, "verify">[] = [
   {
     id: "case-1",
     name: "Next.js App Router (RSC Flight Chunks)",
-    description: "Modern Next.js App Router site streaming RSC flight chunks with author entity, bio, socials, and articles",
+    description:
+      "Modern Next.js App Router site streaming RSC flight chunks with author entity, bio, socials, and articles",
     pageUrl: "https://thechronicle.tech/posts/future-of-agentic-ai",
     html: `<!DOCTYPE html>
 <html lang="en">
@@ -55,9 +55,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Elena Rostova",
-      expectedDetails: "Bio: 'Senior AI & Tech Reporter...', Email: elena@thechronicle.tech, Avatar: https://thechronicle.tech/avatars/elena.jpg, Socials: Twitter (@erostova), LinkedIn (elena-rostova), 1 Article referenced",
+      expectedDetails:
+        "Bio: 'Senior AI & Tech Reporter...', Email: elena@thechronicle.tech, Avatar: https://thechronicle.tech/avatars/elena.jpg, Socials: Twitter (@erostova), LinkedIn (elena-rostova), 1 Article referenced",
       expectedTechStack: "Next.js (App Router / Flight)",
-      keyObservations: "Metascraper completely misses Elena Rostova because it only checks DOM bylines and standard meta tags, not Flight chunks. Omniscrape decodes Flight chunks and reconstructs references.",
+      keyObservations:
+        "Metascraper completely misses Elena Rostova because it only checks DOM bylines and standard meta tags, not Flight chunks. Omniscrape decodes Flight chunks and reconstructs references.",
     },
   },
 
@@ -100,9 +102,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Marcus Vance",
-      expectedDetails: "Bio: 'Staff Performance Architect...', GitHub social profile: https://github.com/marcusvance (handle: marcusvance)",
+      expectedDetails:
+        "Bio: 'Staff Performance Architect...', GitHub social profile: https://github.com/marcusvance (handle: marcusvance)",
       expectedTechStack: "Nuxt 3",
-      keyObservations: "Nuxt 3 devalue serialization uses an indexed array with pointer references. Metascraper cannot parse this. Omniscrape resolves the devalue reference graph.",
+      keyObservations:
+        "Nuxt 3 devalue serialization uses an indexed array with pointer references. Metascraper cannot parse this. Omniscrape resolves the devalue reference graph.",
     },
   },
 
@@ -167,9 +171,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Sophia Chen",
-      expectedDetails: "JobTitle: Environmental Investigations Lead, Email: sophia.chen@globalinvestigator.org, Socials: Twitter and LinkedIn, Publisher: Global Investigator Press",
+      expectedDetails:
+        "JobTitle: Environmental Investigations Lead, Email: sophia.chen@globalinvestigator.org, Socials: Twitter and LinkedIn, Publisher: Global Investigator Press",
       expectedTechStack: "Unknown (pure static / JSON-LD)",
-      keyObservations: "Naive scrapers often grab the first Person encountered in JSON-LD (@graph[1]: Dr. Anthony Reviewer) or mistake the reviewer for the author. Omniscrape scopes extraction strictly to NewsArticle.author.",
+      keyObservations:
+        "Naive scrapers often grab the first Person encountered in JSON-LD (@graph[1]: Dr. Anthony Reviewer) or mistake the reviewer for the author. Omniscrape scopes extraction strictly to NewsArticle.author.",
     },
   },
 
@@ -179,7 +185,8 @@ const caseData: Omit<TestCase, "verify">[] = [
   {
     id: "case-4",
     name: "Co-Authors with Equal Weight (Conservative Review Queue)",
-    description: "Two distinct named co-authors with separate profile URLs; Omniscrape attribution rules require Unknown Author + Review queue",
+    description:
+      "Two distinct named co-authors with separate profile URLs; Omniscrape attribution rules require Unknown Author + Review queue",
     pageUrl: "https://sciencereview.org/articles/quantum-entanglement-breakthrough",
     html: `<!DOCTYPE html>
 <html>
@@ -215,9 +222,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Unknown Author",
-      expectedDetails: "Both David Kim and Maria Garcia placed into review queue with reason: ambiguous_identity, keeping full provenance and respective emails.",
+      expectedDetails:
+        "Both David Kim and Maria Garcia placed into review queue with reason: ambiguous_identity, keeping full provenance and respective emails.",
       expectedTechStack: "Unknown",
-      keyObservations: "Metascraper creates a single fake author 'David Kim and Maria Garcia'. Omniscrape safely detects co-authorship / ambiguity, assigns 'Unknown Author', and populates `review` so consumer apps can handle multi-authorship cleanly.",
+      keyObservations:
+        "Metascraper creates a single fake author 'David Kim and Maria Garcia'. Omniscrape safely detects co-authorship / ambiguity, assigns 'Unknown Author', and populates `review` so consumer apps can handle multi-authorship cleanly.",
     },
   },
 
@@ -259,9 +268,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Rahul Sharma",
-      expectedDetails: "id: rs-4040 (raw CMS ID). Editorial: ownerName: 'Economy & Markets Desk', assigneeName: 'Duty Editor', publisher: 'Quint Media'.",
+      expectedDetails:
+        "id: rs-4040 (raw CMS ID). Editorial: ownerName: 'Economy & Markets Desk', assigneeName: 'Duty Editor', publisher: 'Quint Media'.",
       expectedTechStack: "Quintype",
-      keyObservations: "Metascraper cannot parse Quintype static-page JSON. Omniscrape extracts author while strictly separating editorial owners/assignees from the byline author.",
+      keyObservations:
+        "Metascraper cannot parse Quintype static-page JSON. Omniscrape extracts author while strictly separating editorial owners/assignees from the byline author.",
     },
   },
   {
@@ -272,9 +283,11 @@ const caseData: Omit<TestCase, "verify">[] = [
     html: `<script type="application/ld+json">{"@type":"ProfilePage","mainEntity":{"@type":"Person","name":"Clara Oswald","url":"https://timesdaily.org/authors/clara-oswald","description":"Covering European politics and humanitarian affairs since 2018.","sameAs":["https://twitter.com/clara_oswald_td","https://github.com/claraoswald","https://muckrack.com/clara-oswald"]}}</script><div class="author-profile"><h1>Clara Oswald</h1><article><h3><a href="/world/berlin-summit-agreements">Key Outcomes of the Berlin Climate Summit</a></h3></article><article><h3><a href="/world/balkan-diplomacy-update">New Diplomatic Channels Opened in the Balkans</a></h3></article><article><h3><a href="/world/geneva-humanitarian-talks">Behind Closed Doors at Geneva Talks</a></h3></article></div>`,
     humanEvaluation: {
       expectedAuthor: "Clara Oswald",
-      expectedDetails: "Bio: 'Covering European politics...', Socials: Twitter (@clara_oswald_td), GitHub (claraoswald), MuckRack (clara-oswald). Articles: 3 articles correctly extracted and resolved to absolute URLs.",
+      expectedDetails:
+        "Bio: 'Covering European politics...', Socials: Twitter (@clara_oswald_td), GitHub (claraoswald), MuckRack (clara-oswald). Articles: 3 articles correctly extracted and resolved to absolute URLs.",
       expectedTechStack: "Unknown",
-      keyObservations: "Metascraper cannot extract an author's articles list on profile pages, and erroneously names the author after the first article title. Omniscrape extracts both author and bibliography.",
+      keyObservations:
+        "Metascraper cannot extract an author's articles list on profile pages, and erroneously names the author after the first article title. Omniscrape extracts both author and bibliography.",
     },
   },
 
@@ -284,7 +297,8 @@ const caseData: Omit<TestCase, "verify">[] = [
   {
     id: "case-7",
     name: "Next.js Pages Router (__NEXT_DATA__) with Conflicting DOM Byline",
-    description: "Hydration has specific author Zack Morris while DOM has vague 'Staff Reporter'; Hydration should take precedence",
+    description:
+      "Hydration has specific author Zack Morris while DOM has vague 'Staff Reporter'; Hydration should take precedence",
     pageUrl: "https://techpulse.co/articles/edge-computing-trends",
     html: `<!DOCTYPE html>
 <html>
@@ -325,9 +339,11 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Zack Morris",
-      expectedDetails: "Bio: 'Cloud and Edge infrastructure...', Avatar: https://techpulse.co/team/zack.png, Twitter handle: zack_edge. 'Staff Reporter' in review as different identity.",
+      expectedDetails:
+        "Bio: 'Cloud and Edge infrastructure...', Avatar: https://techpulse.co/team/zack.png, Twitter handle: zack_edge. 'Staff Reporter' in review as different identity.",
       expectedTechStack: "Next.js (Pages Router)",
-      keyObservations: "Metascraper falls back to <meta name='author' content='Staff Reporter'> or DOM byline 'Staff Reporter'. Omniscrape extracts the real author Zack Morris from hydration props with high confidence.",
+      keyObservations:
+        "Metascraper falls back to <meta name='author' content='Staff Reporter'> or DOM byline 'Staff Reporter'. Omniscrape extracts the real author Zack Morris from hydration props with high confidence.",
     },
   },
 
@@ -337,7 +353,8 @@ const caseData: Omit<TestCase, "verify">[] = [
   {
     id: "case-8",
     name: "Adversarial Inputs, XSS, Base Tag & Corrupted Scripts",
-    description: "Broken JSON-LD script, javascript: protocol XSS in byline, share button social link, base tag relative resolution",
+    description:
+      "Broken JSON-LD script, javascript: protocol XSS in byline, share button social link, base tag relative resolution",
     pageUrl: "https://securityjournal.org/post/sandbox-escape",
     html: `<!DOCTYPE html>
 <html>
@@ -376,51 +393,243 @@ const caseData: Omit<TestCase, "verify">[] = [
 </html>`,
     humanEvaluation: {
       expectedAuthor: "Dr. Viktor Ólafsson",
-      expectedDetails: "Corrupted script logged in `issues`. `javascript:` URLs rejected. Twitter share URL rejected (not personal). GitHub accepted: https://github.com/viktor-sec. Relative URL resolved with base URL.",
+      expectedDetails:
+        "Corrupted script logged in `issues`. `javascript:` URLs rejected. Twitter share URL rejected (not personal). GitHub accepted: https://github.com/viktor-sec. Relative URL resolved with base URL.",
       expectedTechStack: "Unknown",
-      keyObservations: "Metascraper does not validate social profiles or isolate corrupted scripts cleanly. Omniscrape safely ignores bad scripts, rejects dangerous schemes, and normalizes valid metadata.",
+      keyObservations:
+        "Metascraper does not validate social profiles or isolate corrupted scripts cleanly. Omniscrape safely ignores bad scripts, rejects dangerous schemes, and normalizes valid metadata.",
     },
   },
 ];
 
-function extraCase(id: string, name: string, pageUrl: string, html: string, expectedAuthor: string, options?: ParseOptions): Omit<TestCase, "verify"> {
+function extraCase(
+  id: string,
+  name: string,
+  pageUrl: string,
+  html: string,
+  expectedAuthor: string,
+  options?: ParseOptions,
+): Omit<TestCase, "verify"> {
   return {
-    id, name, description: name, pageUrl, html, options,
-    humanEvaluation: { expectedAuthor, expectedDetails: name, expectedTechStack: "Synthetic fixture", keyObservations: "Deterministic regression contract" },
+    id,
+    name,
+    description: name,
+    pageUrl,
+    html,
+    options,
+    humanEvaluation: {
+      expectedAuthor,
+      expectedDetails: name,
+      expectedTechStack: "Synthetic fixture",
+      keyObservations: "Deterministic regression contract",
+    },
   };
 }
 
-const cmsFlat = (extra: Record<string, unknown> = {}) => ({ story: { "author-name": "Rahul Sharma", "author-id": "rs-4040", "publisher-name": "Quint Media", ...extra } });
+const cmsFlat = (extra: Record<string, unknown> = {}) => ({
+  story: { "author-name": "Rahul Sharma", "author-id": "rs-4040", "publisher-name": "Quint Media", ...extra },
+});
 const cmsScript = (key: string, data: unknown) => `<script>${key} = ${JSON.stringify(data)};</script>`;
-const lineup = { main: [{ type: "lineup", content: Array.from({ length: 17 }, (_, index) => ({ itemType: "story", author: { name: `Card Writer ${index + 1}` } })) }] };
-const twentyCards = Array.from({ length: 20 }, (_, index) => `<article class="river-item"><h2><a href="/story-${index + 1}">A sufficiently long synthetic story headline number ${index + 1}</a></h2></article>`).join("");
-const threeHundredCards = Array.from({ length: 300 }, (_, index) => `<article class="river-item"><h2><a href="/story-${index + 1}">A sufficiently long synthetic story headline number ${index + 1}</a></h2><div class="byline">By Card Writer ${index + 1}</div></article>`).join("");
+const lineup = {
+  main: [
+    {
+      type: "lineup",
+      content: Array.from({ length: 17 }, (_, index) => ({
+        itemType: "story",
+        author: { name: `Card Writer ${index + 1}` },
+      })),
+    },
+  ],
+};
+const twentyCards = Array.from(
+  { length: 20 },
+  (_, index) =>
+    `<article class="river-item"><h2><a href="/story-${index + 1}">A sufficiently long synthetic story headline number ${index + 1}</a></h2></article>`,
+).join("");
+const threeHundredCards = Array.from(
+  { length: 300 },
+  (_, index) =>
+    `<article class="river-item"><h2><a href="/story-${index + 1}">A sufficiently long synthetic story headline number ${index + 1}</a></h2><div class="byline">By Card Writer ${index + 1}</div></article>`,
+).join("");
 
 caseData.push(
-  extraCase("case-9", "Quintype flat story author with raw CMS ID", "https://publisher.example/story", `<script id="static-page">${JSON.stringify({ qt: { data: cmsFlat() } })}</script>`, "Rahul Sharma"),
-  extraCase("case-10", "Quintype window.qtData assignment", "https://publisher.example/story", cmsScript("window.qtData", { data: cmsFlat() }), "Rahul Sharma"),
-  extraCase("case-11", "Quintype window.qt data-root unwrapping", "https://publisher.example/story", cmsScript("window.qt", { data: cmsFlat({ title: "Not a person", slug: "story-slug" }) }), "Rahul Sharma"),
-  extraCase("case-12", "Quintype underscore author alias with zero ID", "https://publisher.example/story", `<script id="static-page">${JSON.stringify({ data: { story: { "author_name": "Avery Reporter", "author_id": 0, id: "story-id", slug: "story-slug", title: "Story title" } } })}</script>`, "Avery Reporter"),
-  extraCase("case-13", "Static Fenrir declaration with trailing command setup", "https://publisher.example/story", `<script id="fenrir-client-data">const fenrirClientData = { author: { name: "Static Fenrir Writer", id: "fen-7" } }; window.Fenrir = Object.assign({}, window.Fenrir);</script>`, "Static Fenrir Writer"),
-  extraCase("case-14", "Dynamic Fenrir state followed by valid author metadata", "https://publisher.example/story", `<script id="fenrir-client-data">const fenrirClientData = window.payload;</script><meta name="author" content="Later Writer">`, "Later Writer"),
-  extraCase("case-15", "Biography wrapper is not a bibliography card", "https://publisher.example/profile/author-one", `<section class="author-wrapper river-item"><div class="author-description"><a href="/award">A long award mention in a biography section</a></div></section><section class="river-item"><h2><a href="/real-story">A sufficiently long genuine story headline</a></h2></section>`, "Unknown Author"),
-  extraCase("case-16", "CBC lineup card author isolation", "https://publisher.example/section/world", `<script id="static-page">${JSON.stringify(lineup)}</script>${twentyCards}`, "Unknown Author"),
-  extraCase("case-17", "Guardian corroborated profile section", "https://publisher.example/profile/nicola-davis", `<section class="hashed-profile"><h2>Nicola Davis</h2><picture><img alt="Headshot of Nicola Davis" src="/nicola.jpg"></picture><p>Nicola Davis is an environment correspondent covering wildlife and climate.</p></section>`, "Nicola Davis"),
-  extraCase("case-18", "NPR archived biography with matching speakable pair", "https://publisher.example/people/2100394/tony-cox", `<header class="contentheader--archived-bio"><h2 class="branding__title">Tony Cox</h2></header><div class="speakable"><b data-is-speakable="true">Tony Cox</b><b data-is-speakable="true">Tony Cox has covered public radio and national affairs for decades.</b></div>`, "Tony Cox"),
-  extraCase("case-19", "Encoded markup in metadata description", "https://publisher.example/story", `<meta name="description" content="A &amp;eacute; summary with &lt;a href='/person'&gt;markup&lt;/a&gt;.">`, "Unknown Author"),
-  extraCase("case-20", "Encoded structured author matches Unicode byline", "https://publisher.example/story", `<script type="application/ld+json">{"@type":"NewsArticle","url":"https://publisher.example/story","author":{"@type":"Person","name":"Ren&eacute; Writer","url":"/authors/rene","email":"rene@example.org"}}</script><div class="byline"><a href="/authors/rene">René Writer</a></div>`, "René Writer"),
-  extraCase("case-21", "Raw newline in direct Flight push literal", "https://publisher.example/story", `<script>self.__next_f.push([1,"0:{\\\"author\\\":\\\"$1\\\"}\n1:{\\\"name\\\":\\\"Recovered Flight Writer\\\"}"])</script>`, "Recovered Flight Writer"),
-  extraCase("case-22", "Unclosed Flight literal does not suppress later byline", "https://publisher.example/story", `<script>self.__next_f.push([1,"unclosed</script><meta name="author" content="Independent Writer">`, "Independent Writer"),
-  extraCase("case-23", "Cooked static Flight template chunk", "https://publisher.example/story", '<script>self.__next_f.push([1,`0:{"author":"$1"}\\n1:{"name":"Cooked Template Writer"}`])</script>', "Cooked Template Writer"),
-  extraCase("case-24", "Publisher homepage metadata without author", "https://publisher.example/", `<title>Publisher Network</title><meta name="description" content="Independent reporting from around the world"><meta property="og:image" content="/logo.png"><script type="application/ld+json">{"@type":"Organization","name":"Publisher Network","logo":"/logo.png"}</script>${twentyCards}`, "Unknown Author"),
-  extraCase("case-25", "Explicit institutional newsroom byline", "https://publisher.example/story", `<title>Publisher Network</title><meta name="publisher" content="Publisher Network"><div class="byline">Newsroom</div>`, "Newsroom"),
-  extraCase("case-26", "Same-name distinct profile identities stay unresolved", "https://publisher.example/story", `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { author: { name: "Alex Smith", url: "https://publisher.example/authors/alex-one", email: "one@example.org" }, profile: { name: "Alex Smith", url: "https://publisher.example/authors/alex-two", email: "two@example.org" } } } })}</script>`, "Unknown Author"),
-  extraCase("case-27", "Current article array of name-only co-authors", "https://publisher.example/story", `<script type="application/ld+json">${JSON.stringify({ "@type": "NewsArticle", url: "https://publisher.example/story", author: [{ "@type": "Person", name: "Alice Reporter" }, { "@type": "Person", name: "Bob Writer" }] })}</script>`, "Unknown Author"),
-  extraCase("case-28", "Conflicting email fragments for one explicit identity", "https://publisher.example/story", `<script type="application/ld+json">{"@type":"NewsArticle","url":"https://publisher.example/story","author":{"@id":"#alice"}}</script><script type="application/ld+json">{"@id":"#alice","@type":"Person","name":"Alice Reporter","email":"one@example.org"}</script><script type="application/ld+json">{"@id":"#alice","email":"two@example.org"}</script>`, "Alice Reporter"),
-  extraCase("case-29", "Oversized early script followed by valid DOM target", "https://publisher.example/story", `<script>window.__INITIAL_STATE__ = ${JSON.stringify({ author: { name: "Oversized Writer" }, padding: "x".repeat(300) })};</script><div class="byline">Later DOM Writer</div>`, "Later DOM Writer", { maxScriptBytes: 100, includeRawHydration: true }),
-  extraCase("case-30", "Deep discarded hydration branch preserves shallow person", "https://publisher.example/story", `<script id="static-page">${JSON.stringify({ author: { name: "Shallow Writer", id: "writer-1" }, deep: { a: { b: { c: { name: "Too Deep Writer" } } } } })}</script>`, "Shallow Writer", { maxDecodeDepth: 2 }),
-  extraCase("case-31", "Missing cyclic Flight references do not fabricate a contact", "https://publisher.example/story", `<script>self.__next_f.push([1,${JSON.stringify('0:{"author":"$99","cycle":"$1"}\\n1:{"name":"Cycle Writer","email":"fake@example.org","next":"$1"}\\n')}])</script><meta name="author" content="Independent Writer">`, "Independent Writer"),
-  extraCase("case-32", "Profile header ignores 300 story-card bylines", "https://publisher.example/profile/nicola-davis", `<section class="author-profile"><h1>Nicola Davis</h1><div class="author-bio">Nicola Davis reports on science, environment, and wildlife.</div></section>${threeHundredCards}`, "Nicola Davis"),
+  extraCase(
+    "case-9",
+    "Quintype flat story author with raw CMS ID",
+    "https://publisher.example/story",
+    `<script id="static-page">${JSON.stringify({ qt: { data: cmsFlat() } })}</script>`,
+    "Rahul Sharma",
+  ),
+  extraCase(
+    "case-10",
+    "Quintype window.qtData assignment",
+    "https://publisher.example/story",
+    cmsScript("window.qtData", { data: cmsFlat() }),
+    "Rahul Sharma",
+  ),
+  extraCase(
+    "case-11",
+    "Quintype window.qt data-root unwrapping",
+    "https://publisher.example/story",
+    cmsScript("window.qt", { data: cmsFlat({ title: "Not a person", slug: "story-slug" }) }),
+    "Rahul Sharma",
+  ),
+  extraCase(
+    "case-12",
+    "Quintype underscore author alias with zero ID",
+    "https://publisher.example/story",
+    `<script id="static-page">${JSON.stringify({ data: { story: { author_name: "Avery Reporter", author_id: 0, id: "story-id", slug: "story-slug", title: "Story title" } } })}</script>`,
+    "Avery Reporter",
+  ),
+  extraCase(
+    "case-13",
+    "Static Fenrir declaration with trailing command setup",
+    "https://publisher.example/story",
+    `<script id="fenrir-client-data">const fenrirClientData = { author: { name: "Static Fenrir Writer", id: "fen-7" } }; window.Fenrir = Object.assign({}, window.Fenrir);</script>`,
+    "Static Fenrir Writer",
+  ),
+  extraCase(
+    "case-14",
+    "Dynamic Fenrir state followed by valid author metadata",
+    "https://publisher.example/story",
+    `<script id="fenrir-client-data">const fenrirClientData = window.payload;</script><meta name="author" content="Later Writer">`,
+    "Later Writer",
+  ),
+  extraCase(
+    "case-15",
+    "Biography wrapper is not a bibliography card",
+    "https://publisher.example/profile/author-one",
+    `<section class="author-wrapper river-item"><div class="author-description"><a href="/award">A long award mention in a biography section</a></div></section><section class="river-item"><h2><a href="/real-story">A sufficiently long genuine story headline</a></h2></section>`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-16",
+    "CBC lineup card author isolation",
+    "https://publisher.example/section/world",
+    `<script id="static-page">${JSON.stringify(lineup)}</script>${twentyCards}`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-17",
+    "Guardian corroborated profile section",
+    "https://publisher.example/profile/nicola-davis",
+    `<section class="hashed-profile"><h2>Nicola Davis</h2><picture><img alt="Headshot of Nicola Davis" src="/nicola.jpg"></picture><p>Nicola Davis is an environment correspondent covering wildlife and climate.</p></section>`,
+    "Nicola Davis",
+  ),
+  extraCase(
+    "case-18",
+    "NPR archived biography with matching speakable pair",
+    "https://publisher.example/people/2100394/tony-cox",
+    `<header class="contentheader--archived-bio"><h2 class="branding__title">Tony Cox</h2></header><div class="speakable"><b data-is-speakable="true">Tony Cox</b><b data-is-speakable="true">Tony Cox has covered public radio and national affairs for decades.</b></div>`,
+    "Tony Cox",
+  ),
+  extraCase(
+    "case-19",
+    "Encoded markup in metadata description",
+    "https://publisher.example/story",
+    `<meta name="description" content="A &amp;eacute; summary with &lt;a href='/person'&gt;markup&lt;/a&gt;.">`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-20",
+    "Encoded structured author matches Unicode byline",
+    "https://publisher.example/story",
+    `<script type="application/ld+json">{"@type":"NewsArticle","url":"https://publisher.example/story","author":{"@type":"Person","name":"Ren&eacute; Writer","url":"/authors/rene","email":"rene@example.org"}}</script><div class="byline"><a href="/authors/rene">René Writer</a></div>`,
+    "René Writer",
+  ),
+  extraCase(
+    "case-21",
+    "Raw newline in direct Flight push literal",
+    "https://publisher.example/story",
+    `<script>self.__next_f.push([1,"0:{\\"author\\":\\"$1\\"}\n1:{\\"name\\":\\"Recovered Flight Writer\\"}"])</script>`,
+    "Recovered Flight Writer",
+  ),
+  extraCase(
+    "case-22",
+    "Unclosed Flight literal does not suppress later byline",
+    "https://publisher.example/story",
+    `<script>self.__next_f.push([1,"unclosed</script><meta name="author" content="Independent Writer">`,
+    "Independent Writer",
+  ),
+  extraCase(
+    "case-23",
+    "Cooked static Flight template chunk",
+    "https://publisher.example/story",
+    '<script>self.__next_f.push([1,`0:{"author":"$1"}\\n1:{"name":"Cooked Template Writer"}`])</script>',
+    "Cooked Template Writer",
+  ),
+  extraCase(
+    "case-24",
+    "Publisher homepage metadata without author",
+    "https://publisher.example/",
+    `<title>Publisher Network</title><meta name="description" content="Independent reporting from around the world"><meta property="og:image" content="/logo.png"><script type="application/ld+json">{"@type":"Organization","name":"Publisher Network","logo":"/logo.png"}</script>${twentyCards}`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-25",
+    "Explicit institutional newsroom byline",
+    "https://publisher.example/story",
+    `<title>Publisher Network</title><meta name="publisher" content="Publisher Network"><div class="byline">Newsroom</div>`,
+    "Newsroom",
+  ),
+  extraCase(
+    "case-26",
+    "Same-name distinct profile identities stay unresolved",
+    "https://publisher.example/story",
+    `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { author: { name: "Alex Smith", url: "https://publisher.example/authors/alex-one", email: "one@example.org" }, profile: { name: "Alex Smith", url: "https://publisher.example/authors/alex-two", email: "two@example.org" } } } })}</script>`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-27",
+    "Current article array of name-only co-authors",
+    "https://publisher.example/story",
+    `<script type="application/ld+json">${JSON.stringify({
+      "@type": "NewsArticle",
+      url: "https://publisher.example/story",
+      author: [
+        { "@type": "Person", name: "Alice Reporter" },
+        { "@type": "Person", name: "Bob Writer" },
+      ],
+    })}</script>`,
+    "Unknown Author",
+  ),
+  extraCase(
+    "case-28",
+    "Conflicting email fragments for one explicit identity",
+    "https://publisher.example/story",
+    `<script type="application/ld+json">{"@type":"NewsArticle","url":"https://publisher.example/story","author":{"@id":"#alice"}}</script><script type="application/ld+json">{"@id":"#alice","@type":"Person","name":"Alice Reporter","email":"one@example.org"}</script><script type="application/ld+json">{"@id":"#alice","email":"two@example.org"}</script>`,
+    "Alice Reporter",
+  ),
+  extraCase(
+    "case-29",
+    "Oversized early script followed by valid DOM target",
+    "https://publisher.example/story",
+    `<script>window.__INITIAL_STATE__ = ${JSON.stringify({ author: { name: "Oversized Writer" }, padding: "x".repeat(300) })};</script><div class="byline">Later DOM Writer</div>`,
+    "Later DOM Writer",
+    { maxScriptBytes: 100, includeRawHydration: true },
+  ),
+  extraCase(
+    "case-30",
+    "Deep discarded hydration branch preserves shallow person",
+    "https://publisher.example/story",
+    `<script id="static-page">${JSON.stringify({ author: { name: "Shallow Writer", id: "writer-1" }, deep: { a: { b: { c: { name: "Too Deep Writer" } } } } })}</script>`,
+    "Shallow Writer",
+    { maxDecodeDepth: 2 },
+  ),
+  extraCase(
+    "case-31",
+    "Missing cyclic Flight references do not fabricate a contact",
+    "https://publisher.example/story",
+    `<script>self.__next_f.push([1,${JSON.stringify('0:{"author":"$99","cycle":"$1"}\\n1:{"name":"Cycle Writer","email":"fake@example.org","next":"$1"}\\n')}])</script><meta name="author" content="Independent Writer">`,
+    "Independent Writer",
+  ),
+  extraCase(
+    "case-32",
+    "Profile header ignores 300 story-card bylines",
+    "https://publisher.example/profile/nicola-davis",
+    `<section class="author-profile"><h1>Nicola Davis</h1><div class="author-bio">Nicola Davis reports on science, environment, and wildlife.</div></section>${threeHundredCards}`,
+    "Nicola Davis",
+  ),
 );
 
 export const testCases: TestCase[] = caseData.map((tc) => ({
@@ -429,10 +638,17 @@ export const testCases: TestCase[] = caseData.map((tc) => ({
     assert.equal(result.author.name, tc.humanEvaluation.expectedAuthor, `${tc.id} author.name`);
     if (tc.id === "case-4") {
       assert.deepEqual(result.review.map(({ author }) => author.name).sort(), ["David Kim", "Maria Garcia"]);
-      assert.deepEqual(result.review.map(({ author }) => author.email).sort(), ["david.kim@physics.org", "maria.garcia@quantum.org"]);
-      assert.deepEqual(result.authors.map(({ name, email }) => [name, email]), [
-        ["David Kim", "david.kim@physics.org"], ["Maria Garcia", "maria.garcia@quantum.org"],
+      assert.deepEqual(result.review.map(({ author }) => author.email).sort(), [
+        "david.kim@physics.org",
+        "maria.garcia@quantum.org",
       ]);
+      assert.deepEqual(
+        result.authors.map(({ name, email }) => [name, email]),
+        [
+          ["David Kim", "david.kim@physics.org"],
+          ["Maria Garcia", "maria.garcia@quantum.org"],
+        ],
+      );
       assert(result.provenance.some(({ field }) => field === "authors[0].name"));
       assert(result.provenance.some(({ field }) => field === "authors[1].email"));
     }
@@ -441,91 +657,186 @@ export const testCases: TestCase[] = caseData.map((tc) => ({
       assert.equal(result.editorial.publisher, "Quint Media");
       assert.equal(result.editorial.ownerName, "Economy & Markets Desk");
       assert.equal(result.editorial.assigneeName, "Duty Editor");
-      assert(result.provenance.some(({ field, sourcePath, entity }) => field === "author.id" && sourcePath.endsWith(".author-id") && entity?.includes("thequint.example.com")));
-      assert(result.provenance.some(({ field, sourcePath }) => field === "editorial.publisher" && sourcePath.endsWith(".publisher-name")));
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath, entity }) =>
+            field === "author.id" && sourcePath.endsWith(".author-id") && entity?.includes("thequint.example.com"),
+        ),
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "editorial.publisher" && sourcePath.endsWith(".publisher-name"),
+        ),
+      );
     }
     if (tc.id === "case-1") {
       assert.equal(result.author.email, "elena@thechronicle.tech");
       assert.equal(result.author.bio, "Senior AI & Tech Reporter at The Chronicle.");
-      assert.deepEqual(result.author.socials.map(({ url }) => url), ["https://twitter.com/erostova", "https://linkedin.com/in/elena-rostova"]);
-      assert.deepEqual(result.articles, [{ title: "How Large Models Plan", url: "https://thechronicle.tech/posts/how-models-plan", publishedAt: "2026-09-15T10:00:00.000Z" }]);
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.includes("#flight:")));
+      assert.deepEqual(
+        result.author.socials.map(({ url }) => url),
+        ["https://twitter.com/erostova", "https://linkedin.com/in/elena-rostova"],
+      );
+      assert.deepEqual(result.articles, [
+        {
+          title: "How Large Models Plan",
+          url: "https://thechronicle.tech/posts/how-models-plan",
+          publishedAt: "2026-09-15T10:00:00.000Z",
+        },
+      ]);
+      assert(
+        result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.includes("#flight:")),
+      );
       assert.equal(result.issues.length, 0);
     }
     if (tc.id === "case-2") {
       assert.equal(result.author.bio, "Staff Performance Architect and Tech Writer.");
-      assert.deepEqual(result.author.socials.map(({ url }) => url), ["https://github.com/marcusvance"]);
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.endsWith(".author.name")));
+      assert.deepEqual(
+        result.author.socials.map(({ url }) => url),
+        ["https://github.com/marcusvance"],
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.name" && sourcePath.endsWith(".author.name"),
+        ),
+      );
       assert.equal(result.issues.length, 0);
     }
     if (tc.id === "case-3") {
       assert.equal(result.author.email, "sophia.chen@globalinvestigator.org");
-      assert.deepEqual(result.articles.map(({ url }) => url), ["https://globalinvestigator.org/reports/deep-sea-mining"]);
+      assert.deepEqual(
+        result.articles.map(({ url }) => url),
+        ["https://globalinvestigator.org/reports/deep-sea-mining"],
+      );
       assert.equal(result.editorial.publisher, "Global Investigator Press");
-      assert.deepEqual(result.review.map(({ author, reason }) => [author.name, reason]), [["Dr. Anthony Reviewer", "different_identity"]]);
+      assert.deepEqual(
+        result.review.map(({ author, reason }) => [author.name, reason]),
+        [["Dr. Anthony Reviewer", "different_identity"]],
+      );
       assert(result.review[0]?.provenance.some(({ sourcePath }) => sourcePath.endsWith("@graph[1].name")));
     }
     if (tc.id === "case-6") {
-      assert.deepEqual(result.articles.map(({ url }) => url), [
-        "https://timesdaily.org/world/berlin-summit-agreements",
-        "https://timesdaily.org/world/balkan-diplomacy-update",
-        "https://timesdaily.org/world/geneva-humanitarian-talks",
-      ]);
+      assert.deepEqual(
+        result.articles.map(({ url }) => url),
+        [
+          "https://timesdaily.org/world/berlin-summit-agreements",
+          "https://timesdaily.org/world/balkan-diplomacy-update",
+          "https://timesdaily.org/world/geneva-humanitarian-talks",
+        ],
+      );
       assert.equal(result.author.bio, "Covering European politics and humanitarian affairs since 2018.");
-      assert.deepEqual(result.author.socials.map(({ url }) => url), [
-        "https://twitter.com/clara_oswald_td", "https://github.com/claraoswald", "https://muckrack.com/clara-oswald",
-      ]);
+      assert.deepEqual(
+        result.author.socials.map(({ url }) => url),
+        ["https://twitter.com/clara_oswald_td", "https://github.com/claraoswald", "https://muckrack.com/clara-oswald"],
+      );
     }
     if (tc.id === "case-7") {
       assert.equal(result.author.avatarUrl, "https://techpulse.co/team/zack.png");
-      assert.deepEqual(result.review.map(({ author, reason }) => [author.name, reason]), [["Staff Reporter", "different_identity"]]);
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.avatarUrl" && sourcePath.endsWith(".avatarUrl")));
+      assert.deepEqual(
+        result.review.map(({ author, reason }) => [author.name, reason]),
+        [["Staff Reporter", "different_identity"]],
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.avatarUrl" && sourcePath.endsWith(".avatarUrl"),
+        ),
+      );
     }
     if (tc.id === "case-8") {
-      assert(result.issues.some(({ sourcePath, message }) => sourcePath === "script[0]" && message === "Malformed JSON-LD"));
-      assert.deepEqual(result.author.socials.map(({ url }) => url), ["https://github.com/viktor-sec"]);
-      assert(result.provenance.every(({ value }) => !value.startsWith("javascript:") && !value.includes("intent/tweet")));
+      assert(
+        result.issues.some(({ sourcePath, message }) => sourcePath === "script[0]" && message === "Malformed JSON-LD"),
+      );
+      assert.deepEqual(
+        result.author.socials.map(({ url }) => url),
+        ["https://github.com/viktor-sec"],
+      );
+      assert(
+        result.provenance.every(({ value }) => !value.startsWith("javascript:") && !value.includes("intent/tweet")),
+      );
     }
     if (tc.id === "case-9") {
       assert.equal(result.author.id, "rs-4040");
       assert.equal(result.editorial.publisher, "Quint Media");
-      assert(result.provenance.some(({ field, sourcePath, entity }) => field === "author.name" && sourcePath.endsWith(".story.author-name") && entity?.includes("publisher.example")));
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.id" && sourcePath.endsWith(".story.author-id")));
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath, entity }) =>
+            field === "author.name" &&
+            sourcePath.endsWith(".story.author-name") &&
+            entity?.includes("publisher.example"),
+        ),
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.id" && sourcePath.endsWith(".story.author-id"),
+        ),
+      );
     }
     if (tc.id === "case-10" || tc.id === "case-11") {
       assert.equal(result.author.id, "rs-4040");
       assert.equal(result.editorial.publisher, "Quint Media");
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.includes("@window.qt")));
+      assert(
+        result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.includes("@window.qt")),
+      );
       assert.equal(result.techStack.cms, "Quintype (Bold)");
     }
     if (tc.id === "case-12") {
       assert.equal(result.author.id, 0);
       assert.equal(result.author.slug, undefined);
       assert.equal(result.review.length, 0);
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.id" && sourcePath.endsWith(".author_id")));
+      assert(
+        result.provenance.some(({ field, sourcePath }) => field === "author.id" && sourcePath.endsWith(".author_id")),
+      );
     }
     if (tc.id === "case-13") {
       assert.equal(result.author.id, "fen-7");
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath === "script[0]@fenrirClientData.author.name"));
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.name" && sourcePath === "script[0]@fenrirClientData.author.name",
+        ),
+      );
       assert(result.issues.every(({ message }) => !message.includes("Malformed hydration JSON")));
     }
-    if (tc.id === "case-14") assert(result.issues.some(({ message }) => message === "Unsupported static hydration initializer"));
-    if (tc.id === "case-15") assert.deepEqual(result.articles.map(({ url }) => url), ["https://publisher.example/real-story"]);
+    if (tc.id === "case-14")
+      assert(result.issues.some(({ message }) => message === "Unsupported static hydration initializer"));
+    if (tc.id === "case-15")
+      assert.deepEqual(
+        result.articles.map(({ url }) => url),
+        ["https://publisher.example/real-story"],
+      );
     if (tc.id === "case-16") {
       assert.equal(result.review.length, 0);
       assert.equal(result.articles.length, 20);
-      assert.deepEqual(result.articles.slice(0, 2).map(({ url }) => url), ["https://publisher.example/story-1", "https://publisher.example/story-2"]);
+      assert.deepEqual(
+        result.articles.slice(0, 2).map(({ url }) => url),
+        ["https://publisher.example/story-1", "https://publisher.example/story-2"],
+      );
     }
     if (tc.id === "case-17") {
       assert.equal(result.author.bio, "Nicola Davis is an environment correspondent covering wildlife and climate.");
       assert.equal(result.author.avatarUrl, "https://publisher.example/nicola.jpg");
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.bio" && sourcePath.endsWith("p:nth-of-type(1)")));
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.avatarUrl" && sourcePath.endsWith("img:nth-of-type(1)")));
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.bio" && sourcePath.endsWith("p:nth-of-type(1)"),
+        ),
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.avatarUrl" && sourcePath.endsWith("img:nth-of-type(1)"),
+        ),
+      );
     }
     if (tc.id === "case-18") {
       assert.equal(result.author.bio, "Tony Cox has covered public radio and national affairs for decades.");
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.name" && sourcePath.endsWith("header:nth-of-type(1) > h2:nth-of-type(1)")));
-      assert(result.provenance.some(({ field, sourcePath }) => field === "author.bio" && sourcePath.includes("b:nth-of-type(2)")));
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) =>
+            field === "author.name" && sourcePath.endsWith("header:nth-of-type(1) > h2:nth-of-type(1)"),
+        ),
+      );
+      assert(
+        result.provenance.some(
+          ({ field, sourcePath }) => field === "author.bio" && sourcePath.includes("b:nth-of-type(2)"),
+        ),
+      );
     }
     if (tc.id === "case-19") {
       assert.equal(result.metadata.description, "A é summary with markup .");
@@ -551,17 +862,30 @@ export const testCases: TestCase[] = caseData.map((tc) => ({
       assert.equal(result.authors.length, 0);
     }
     if (tc.id === "case-27") {
-      assert.deepEqual(result.authors.map(({ name }) => name), ["Alice Reporter", "Bob Writer"]);
+      assert.deepEqual(
+        result.authors.map(({ name }) => name),
+        ["Alice Reporter", "Bob Writer"],
+      );
       assert(result.review.every(({ reason }) => reason === "ambiguous_identity"));
     }
     if (tc.id === "case-28") {
       assert.equal(result.author.email, undefined);
-      assert.deepEqual(result.review.filter(({ reason }) => reason === "conflicting_value").map(({ author }) => [author.name, author.email]), [
-        ["Alice Reporter", "one@example.org"], ["Alice Reporter", "two@example.org"],
-      ]);
+      assert.deepEqual(
+        result.review
+          .filter(({ reason }) => reason === "conflicting_value")
+          .map(({ author }) => [author.name, author.email]),
+        [
+          ["Alice Reporter", "one@example.org"],
+          ["Alice Reporter", "two@example.org"],
+        ],
+      );
     }
     if (tc.id === "case-29") {
-      assert(result.issues.some(({ sourcePath, message }) => sourcePath === "script[0]" && message.includes("maxScriptBytes")));
+      assert(
+        result.issues.some(
+          ({ sourcePath, message }) => sourcePath === "script[0]" && message.includes("maxScriptBytes"),
+        ),
+      );
       assert.equal(result.author.name, "Later DOM Writer");
       assert(!String(JSON.stringify(result.rawHydration)).includes("Oversized Writer"));
     }
@@ -579,7 +903,10 @@ export const testCases: TestCase[] = caseData.map((tc) => ({
       assert.equal(result.author.name, "Nicola Davis");
       assert.equal(result.review.length, 0);
       assert.equal(result.articles.length, 20);
-      assert.deepEqual(result.articles.slice(0, 2).map(({ url }) => url), ["https://publisher.example/story-1", "https://publisher.example/story-2"]);
+      assert.deepEqual(
+        result.articles.slice(0, 2).map(({ url }) => url),
+        ["https://publisher.example/story-1", "https://publisher.example/story-2"],
+      );
     }
   },
 }));

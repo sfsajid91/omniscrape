@@ -1,6 +1,6 @@
 {
   "name": "@sfsajid91/omniscrape",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "HTML metadata and author parser with source-aware JSON-LD, DOM, and hydration extraction",
   "homepage": "https://github.com/sfsajid91/omniscrape#readme",
   "repository": {
@@ -26,6 +26,7 @@
     "dist",
     "src",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -36,7 +37,11 @@
     "bench": "bun run scripts/benchmark.ts",
     "check:package": "bun run scripts/package-smoke.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "lint": "biome check",
+    "lint:fix": "biome check --write",
+    "format": "biome format --write",
+    "prepublishOnly": "bun run build",
+    "prepare": "husky"
   },
   "keywords": [
     "scraper",
@@ -68,7 +73,9 @@
     "zod": "^3.22.0 || ^4.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.3",
     "@types/bun": "^1.4.3",
+    "husky": "^9.1.7",
     "typescript": "^5.9.3"
   }
 }

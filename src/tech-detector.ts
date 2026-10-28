@@ -26,16 +26,17 @@ export function detectTechStack(context: PageContext): TechStack {
     framework = "Nuxt 2";
     hydrationFormat = "window.__NUXT__";
     signals.push("found Nuxt SSR markers");
-  } else if (html.includes("<astro-island") || html.includes("astro-")) {
+  } else if (html.includes("<astro-island") || html.includes("data-astro-") || html.includes("/_astro/")) {
     framework = "Astro";
     signals.push("found Astro markers");
-  } else if (html.includes("__sveltekit") || html.includes("svelte-")) {
+  } else if (html.includes("__sveltekit") || html.includes("data-sveltekit-") || html.includes("/_app/immutable/")) {
     framework = "SvelteKit";
     signals.push("found SvelteKit markers");
   }
 
-  const executableScripts = context.scripts.filter((script) =>
-    !script.type || ["text/javascript", "application/javascript", "module"].includes(script.type));
+  const executableScripts = context.scripts.filter(
+    (script) => !script.type || ["text/javascript", "application/javascript", "module"].includes(script.type),
+  );
   const qtAssignment = executableScripts
     .map((script) => /(?:^|[;{}])\s*((?:window\s*\.\s*)?qt(?:LoadedData|Data)?)\s*=/.exec(script.text)?.[1])
     .find((assignment) => assignment !== undefined);
@@ -52,7 +53,11 @@ export function detectTechStack(context: PageContext): TechStack {
     cms = "Axel Springer (Fenrir)";
     hydrationFormat = "fenrir-client-data";
     signals.push("found #fenrir-client-data");
-  } else if (generator.includes("wordpress") || links.some((link) => /wp-json|api\.w\.org/.test(link.rel)) || html.includes("/wp-content/")) {
+  } else if (
+    generator.includes("wordpress") ||
+    links.some((link) => /wp-json|api\.w\.org/.test(link.rel)) ||
+    html.includes("/wp-content/")
+  ) {
     cms = html.includes("vip.wordpress.com") || onHost("variety.com") ? "WordPress VIP (PMC)" : "WordPress";
     signals.push("found WordPress generator/API/assets");
   } else if (generator.includes("ghost")) {
@@ -77,7 +82,9 @@ export function detectTechStack(context: PageContext): TechStack {
     cms = `Custom (${framework})`;
   } else if (html.includes("window.__INITIAL_STATE__") || html.includes("window.__PRELOADED_STATE__")) {
     cms = "Custom SSR";
-    hydrationFormat = html.includes("window.__INITIAL_STATE__") ? "window.__INITIAL_STATE__" : "window.__PRELOADED_STATE__";
+    hydrationFormat = html.includes("window.__INITIAL_STATE__")
+      ? "window.__INITIAL_STATE__"
+      : "window.__PRELOADED_STATE__";
     signals.push("found window state payload");
   }
 

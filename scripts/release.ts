@@ -16,7 +16,7 @@ if (!dryRun) {
 async function run(command: string[]): Promise<string> {
   const child = Bun.spawn(command, { stdout: "pipe", stderr: "inherit" });
   const output = await new Response(child.stdout).text();
-  if (await child.exited !== 0) throw new Error(`Command failed: ${command.join(" ")}`);
+  if ((await child.exited) !== 0) throw new Error(`Command failed: ${command.join(" ")}`);
   return output.trim();
 }
 
@@ -36,10 +36,20 @@ const manifest: unknown = JSON.parse(await run(["tar", "-xOf", archive, "package
 assert.ok(isRecord(manifest));
 assert.equal(manifest.name, "@sfsajid91/omniscrape");
 const version = manifest.version;
-assert.ok(typeof version === "string" && /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version), "Expected a stable or prerelease semver version");
+assert.ok(
+  typeof version === "string" &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version),
+  "Expected a stable or prerelease semver version",
+);
 const prerelease = version.includes("-");
 if (prerelease) {
-  assert.ok(version.slice(version.indexOf("-") + 1).split(".").every((part) => !/^\d+$/.test(part) || part === "0" || !part.startsWith("0")), "Invalid numeric prerelease identifier");
+  assert.ok(
+    version
+      .slice(version.indexOf("-") + 1)
+      .split(".")
+      .every((part) => !/^\d+$/.test(part) || part === "0" || !part.startsWith("0")),
+    "Invalid numeric prerelease identifier",
+  );
 }
 const tag = `v${version}`;
 const sha = await run(["git", "rev-parse", "HEAD"]);
@@ -53,25 +63,69 @@ if (existingTag) {
   }
 }
 
-const release = await readJson(`https://api.github.com/repos/sfsajid91/omniscrape/releases/tags/${encodeURIComponent(tag)}`, true);
+const release = await readJson(
+  `https://api.github.com/repos/sfsajid91/omniscrape/releases/tags/${encodeURIComponent(tag)}`,
+  true,
+);
 if (release !== undefined) {
-  assert.ok(isRecord(release) && release.draft === false && release.prerelease === prerelease, "Existing release must be published and match the version's prerelease status");
+  assert.ok(
+    isRecord(release) && release.draft === false && release.prerelease === prerelease,
+    "Existing release must be published and match the version's prerelease status",
+  );
   assert.ok(existingTag, "An existing release must have a fetched tag");
 }
-const published = await readJson(`https://registry.npmjs.org/${encodeURIComponent(manifest.name)}/${encodeURIComponent(version)}`);
+const published = await readJson(
+  `https://registry.npmjs.org/${encodeURIComponent(manifest.name)}/${encodeURIComponent(version)}`,
+);
 if (published !== undefined) {
-  const integrity = `sha512-${createHash("sha512").update(Buffer.from(await Bun.file(archive).arrayBuffer())).digest("base64")}`;
-  assert.ok(isRecord(published) && isRecord(published.dist) && published.dist.integrity === integrity, "The registry version exists with different contents; bump the version instead of overwriting it");
+  const integrity = `sha512-${createHash("sha512")
+    .update(Buffer.from(await Bun.file(archive).arrayBuffer()))
+    .digest("base64")}`;
+  assert.ok(
+    isRecord(published) && isRecord(published.dist) && published.dist.integrity === integrity,
+    "The registry version exists with different contents; bump the version instead of overwriting it",
+  );
 }
 
 if (dryRun) {
-  console.log(JSON.stringify({ dryRun, sha, tag, createRelease: release === undefined, publish: published === undefined, distTag: prerelease ? "next" : "latest" }));
+  console.log(
+    JSON.stringify({
+      dryRun,
+      sha,
+      tag,
+      createRelease: release === undefined,
+      publish: published === undefined,
+      distTag: prerelease ? "next" : "latest",
+    }),
+  );
 } else {
   if (release === undefined) {
-    await run(["gh", "release", "create", tag, archive, "--target", sha, "--title", tag, "--generate-notes", ...(prerelease ? ["--prerelease", "--latest=false"] : ["--latest"])]);
+    await run([
+      "gh",
+      "release",
+      "create",
+      tag,
+      archive,
+      "--target",
+      sha,
+      "--title",
+      tag,
+      "--generate-notes",
+      ...(prerelease ? ["--prerelease", "--latest=false"] : ["--latest"]),
+    ]);
   }
   if (published === undefined) {
-    await run(["npm", "publish", archive, "--access", "public", "--provenance", "--tag", prerelease ? "next" : "latest", "--registry=https://registry.npmjs.org/"]);
+    await run([
+      "npm",
+      "publish",
+      archive,
+      "--access",
+      "public",
+      "--provenance",
+      "--tag",
+      prerelease ? "next" : "latest",
+      "--registry=https://registry.npmjs.org/",
+    ]);
   }
   console.log(`${tag}: GitHub release exists and npm publication is complete.`);
 }
