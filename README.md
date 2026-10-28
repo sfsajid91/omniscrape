@@ -16,8 +16,6 @@ npm install @sfsajid91/omniscrape
 bun add @sfsajid91/omniscrape
 ```
 
-> The initial release is `0.1.0`. Registry installation is available once published.
-
 ### Usage
 
 ```typescript
@@ -38,6 +36,7 @@ const result = parseHtml({ html, pageUrl: url });
 
 result.author.name;  // "Alice Reporter"
 result.author.email; // "writer@example.org"
+result.author.emails; // All resolved personal email addresses, when available
 result.authors;      // Resolved author or confirmed co-authors
 result.articles;     // Discovered articles
 result.metadata;     // Page title, description, canonical URL, and more
@@ -45,6 +44,8 @@ result.provenance;   // Evidence behind accepted fields
 result.review;       // Unresolved identities and conflicting values
 result.issues;       // Malformed, unsupported, or resource-limited sources
 ```
+
+When matched sources provide conflicting email addresses, `author.emails` retains the addresses, `author.email` is withheld, and the conflict is recorded in `review`.
 
 Callers fetch HTML with their own client and supply the final response URL:
 
@@ -109,7 +110,7 @@ Numeric limit options must be positive safe integers. Invalid URLs throw `TypeEr
 - **Deterministic & Zero-I/O**: Pure synchronous evaluation without network requests, disk persistence, or browser script execution.
 
 ## Global Side Effects
-- None. Omniscrape performs pure in-memory compute on provided string buffers and returns immutable structured objects.
+- None. Omniscrape performs pure in-memory compute on provided string buffers and returns structured objects.
 
 ## System Verification
 - Run: `bun test tests`
