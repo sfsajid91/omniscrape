@@ -57,3 +57,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Finding 11**: Resolved concordant timestamp drift across microsecond/millisecond ISO representations.
   - **Finding 12**: Guarded HTML character reference decoding to safely handle numeric boundaries and cyclic entities.
   - **Findings 13-16**: Enhanced resource limits and boundary isolation against memory exhaustion on adversarial markup.
+- **Author profile contacts**: Extracts scoped DOM mailto contacts and primary JSON-LD Person description emails, including after questions. Excludes listing contacts and socials; conflicting profile addresses remain quarantined.
