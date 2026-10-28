@@ -43,6 +43,43 @@ describe("issue #7 author profile email extraction", () => {
     ).toBe(true);
   });
 
+  test("extracts a description email after a question mark", () => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: person({ description: `Have a story tip? Email ${bioEmail}.` }),
+    });
+
+    expect(result.author.email).toBe(bioEmail);
+    expect(
+      result.provenance.some(
+        (item) =>
+          item.field === "author.email" && item.source === "json-ld" && item.sourcePath.endsWith(".description"),
+      ),
+    ).toBe(true);
+  });
+
+  test("ignores mailto query parameters when extracting profile contacts", () => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: authorSection(`<a href="mailto:${domEmail}?cc=other@example.com">Email</a>`),
+    });
+
+    expect(result.author.email).toBe(domEmail);
+    expect(result.author.emails).not.toContain("other@example.com");
+  });
+
+  test("does not attribute a listing author's social link to the profile", () => {
+    const result = parseHtml({
+      pageUrl: profileUrl,
+      html: authorSection(
+        `<a href="https://x.com/acfowler">Profile</a><article><h2><a href="/another-story">Another story</a></h2><a href="https://x.com/otherwriter">Twitter</a></article>`,
+      ),
+    });
+
+    expect(result.author.socials?.map((social) => social.url)).toContain("https://x.com/acfowler");
+    expect(result.author.socials?.map((social) => social.url)).not.toContain("https://x.com/otherwriter");
+  });
+
   test("retains distinct profile addresses and quarantines the singular conflict", () => {
     const result = parseHtml({
       pageUrl: profileUrl,

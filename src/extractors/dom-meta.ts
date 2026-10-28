@@ -565,7 +565,9 @@ function authorsFromScope(
   const socialEvidence: ValueEvidence[] = [];
   const seen = new Set<string>();
   for (const anchor of scope.querySelectorAll("a[href]")) {
-    if (isExcludedAttributionScope(anchor)) continue;
+    if (isExcludedAttributionScope(anchor) || isListingAttributionScope(anchor, currentUrls, context.baseUrl)) {
+      continue;
+    }
     const social = socialLink(anchor.getAttribute("href"), context.baseUrl);
     if (!social || seen.has(social.url)) continue;
     seen.add(social.url);

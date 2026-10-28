@@ -114,10 +114,9 @@ export function imageUrl(value: unknown, baseUrl: string): string | undefined {
 }
 
 export function emailAddress(value: unknown): string | undefined {
-  const str = text(value)
-    ?.replace(/^mailto:/i, "")
-    .split("?")[0];
-  if (!str) return undefined;
+  const valueText = text(value);
+  if (!valueText) return undefined;
+  const str = /^mailto:/i.test(valueText) ? valueText.replace(/^mailto:/i, "").split("?")[0] : valueText;
   const match = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.exec(str);
   const raw = match ? match[0] : str;
   let email: string;
