@@ -230,12 +230,27 @@ function collect(
     "linked-stories",
     "linkedStory",
     "linkedStories",
+    "relatedStories",
+    "related-stories",
+    "relatedStory",
+    "related-story",
+    "relatedArticles",
+    "related-articles",
     "mostPopularArticles",
     "most-popular-articles",
   ]);
   const nonAuthorKeys = new Set(["owner", "assignee", "editor", "editorialOwner"]);
   const nonPrimaryKeys = new Set([
+    "config",
+    "seo-metadata",
+    "seoMetadata",
     "related",
+    "relatedStories",
+    "related-stories",
+    "relatedStory",
+    "related-story",
+    "relatedArticles",
+    "related-articles",
     "recommendations",
     "mostPopularArticles",
     "most-popular-articles",
@@ -410,7 +425,7 @@ function collect(
           out,
         );
     }
-    collectEditorial(obj, path, source, out, seenEditorial);
+    if (!nonPrimary) collectEditorial(obj, path, source, out, seenEditorial);
     const isQuintypeCollection = isQuintype && obj.type === "collection";
     if (isQuintypeCollection) addArticles(obj, path, source, context, out);
     for (const [key, child] of Object.entries(obj)) {

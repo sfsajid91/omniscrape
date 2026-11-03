@@ -198,3 +198,181 @@ describe("Quintype author ownership", () => {
     expect(result.techStack.hydrationFormat).toBeUndefined();
   });
 });
+
+describe("Quintype collection role isolation", () => {
+  const profileUrl = "https://gulfnews.com/author/a-ahmed";
+  const owner = { id: 2165189, name: "Ashfaq Ahmed", email: "aahmed@gulfnews.com" };
+  const journalists = [
+    { id: 2584238, name: "Hamna Iqbal, Reporter", email: "hiqbal@gulfnews.com" },
+    { id: 2171005, name: "Stephen N R", email: "snr@gulfnews.com" },
+    { id: 2177450, name: "Krita Coelho", email: "kcoelho@gulfnews.com" },
+    { id: 2287057, name: "Huda Ata", email: "hata@gulfnews.com" },
+    { id: 2167028, name: "Balaram Menon", email: "bmenon@gulfnews.com" },
+    { id: 2171160, name: "Anupam Varma, Online Editor", email: "avarma@gulfnews.com" },
+    { id: 2208704, name: "Surabhi Vasundharadevi", email: "svasundharadevi@gulfnews.com" },
+    { id: 2118000, name: "migrator", email: "migrator@gulfnews.com" },
+  ];
+
+  const collectionPayload = {
+    qt: {
+      data: {
+        author: {
+          id: 2345930,
+          name: "A Ahmed",
+          slug: "a-ahmed",
+          email: "aahmedreporter@gulfnews.com",
+        },
+        authorCollection: {
+          items: journalists.map((journalist, index) => ({
+            story: {
+              id: `story-${index}`,
+              title: `Story ${index}`,
+              slug: `story-${index}`,
+              "author-name": journalist.name,
+              "author-id": journalist.id,
+              "owner-id": owner.id,
+              "owner-name": owner.name,
+              authors: [{ id: journalist.id, name: journalist.name, email: journalist.email }],
+              cards: [
+                {
+                  "story-elements": [
+                    {
+                      metadata: {
+                        "linked-story": {
+                          authors: [
+                            {
+                              id: 2345930,
+                              name: "A Ahmed",
+                              email: "aahmedreporter@gulfnews.com",
+                            },
+                            owner,
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          })),
+        },
+      },
+    },
+  };
+
+  test("separates editorial owner from multiple journalists across collection stories", () => {
+    const result = parseHtml({
+      html: `<script id="static-page" type="application/json">${JSON.stringify(collectionPayload)}</script>`,
+      pageUrl: profileUrl,
+    });
+
+    expect(result.author).toMatchObject({
+      name: "A Ahmed",
+      id: 2345930,
+      email: "aahmedreporter@gulfnews.com",
+    });
+    expect(result.editorial).toMatchObject({
+      ownerName: owner.name,
+      ownerId: owner.id,
+      ownerEmail: owner.email,
+    });
+
+    const ownerEmailProvenance = result.provenance.filter(
+      ({ field, scope }) => field === "editorial.ownerEmail" && scope === "publisher",
+    );
+    expect(ownerEmailProvenance).toHaveLength(1);
+
+    expect(result.authors.map(({ name }) => name)).toEqual(["A Ahmed"]);
+    expect(result.review.some(({ author }) => author.name === owner.name)).toBe(false);
+    for (const journalist of journalists) {
+      expect(result.author.emails).not.toContain(journalist.email);
+      expect(result.authors.some(({ name }) => name === journalist.name)).toBe(false);
+    }
+  });
+
+  test("keeps a story byline author separate from its editorial owner", () => {
+    const bylineAuthor = journalists[0]!;
+    const result = parseHtml({
+      html: `<script id="static-page" type="application/json">${JSON.stringify({
+        qt: {
+          data: {
+            story: {
+              id: "story-byline",
+              title: "Story byline",
+              slug: "story-byline",
+              "author-name": bylineAuthor.name,
+              "author-id": bylineAuthor.id,
+              "owner-id": owner.id,
+              "owner-name": owner.name,
+            },
+            relatedStories: [
+              {
+                story: {
+                  id: "related-story",
+                  title: "Related story",
+                  slug: "related-story",
+                  "author-name": journalists[1]!.name,
+                  "author-id": journalists[1]!.id,
+                  "owner-id": 2169471,
+                  "owner-name": "Devadasan K P",
+                },
+              },
+            ],
+            config: {
+              "publisher-name": "gulfnews",
+              "seo-metadata": [{ "owner-id": 85391 }, { "owner-id": 85232 }],
+            },
+          },
+        },
+      })}</script>`,
+      pageUrl: "https://gulfnews.com/story-byline",
+    });
+
+    expect(result.author).toMatchObject({ name: bylineAuthor.name, id: bylineAuthor.id });
+    expect(result.editorial).toMatchObject({ ownerName: owner.name, ownerId: owner.id });
+    expect(result.editorial).not.toHaveProperty("publisher");
+    expect(result.authors.map(({ name }) => name)).toEqual([bylineAuthor.name]);
+    expect(result.review).toEqual([]);
+    expect(result.issues).toEqual([]);
+  });
+
+  test("resolves a story byline when CMS ID and JSON-LD profile URL agree through slug", () => {
+    const bylineAuthor = journalists[0]!;
+    const result = parseHtml({
+      html:
+        `<script id="static-page" type="application/json">${JSON.stringify({
+          qt: {
+            data: {
+              story: {
+                id: "story-identity",
+                title: "Story identity",
+                slug: "story-identity",
+                "author-name": bylineAuthor.name,
+                "author-id": bylineAuthor.id,
+                authors: [{ id: bylineAuthor.id, name: bylineAuthor.name, slug: "hamna-iqbal" }],
+                "owner-id": owner.id,
+                "owner-name": owner.name,
+              },
+            },
+          },
+        })}</script>` +
+        `<script type="application/ld+json">${JSON.stringify({
+          "@type": "NewsArticle",
+          headline: "Story identity",
+          url: "https://gulfnews.com/story-identity",
+          author: [
+            {
+              "@type": "Person",
+              name: bylineAuthor.name,
+              url: "https://gulfnews.com/author/hamna-iqbal",
+            },
+          ],
+        })}</script>`,
+      pageUrl: "https://gulfnews.com/story-identity",
+    });
+
+    expect(result.author).toMatchObject({ name: bylineAuthor.name, id: bylineAuthor.id, slug: "hamna-iqbal" });
+    expect(result.review).toEqual([]);
+    expect(result.editorial).toMatchObject({ ownerName: owner.name, ownerId: owner.id });
+  });
+});
