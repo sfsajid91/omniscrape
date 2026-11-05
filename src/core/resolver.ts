@@ -206,7 +206,10 @@ function resolveAuthor(
   const named = candidates.filter((candidate) => !!candidate.profile.name && !!candidate.evidence.name);
   const primary = named
     .filter((candidate) => candidate.primary)
-    .sort((a, b) => rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity));
+    .sort(
+      (a, b) =>
+        rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity) || Number(!!slugOf(b)) - Number(!!slugOf(a)),
+    );
   const anchor = primary[0];
   const strongest = anchor ? primary.filter((candidate) => rank(candidate) === rank(anchor)) : [];
   const ambiguous =
