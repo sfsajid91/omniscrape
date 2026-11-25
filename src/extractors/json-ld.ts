@@ -24,6 +24,77 @@ const MAX_ARRAY_ITEMS = 500;
 const MAX_ARTICLE_TITLE = 300;
 const MAX_BIO = 2000;
 const MAX_ROLE = 200;
+const REFERENCE_STRING = /^(?:#|\/|\.\/|\.\.\/|_:|[a-z][a-z0-9+.-]*:)/i;
+
+const ARTICLE_TYPES = new Set([
+  "Article",
+  "NewsArticle",
+  "BlogPosting",
+  "Report",
+  "ScholarlyArticle",
+  "TechArticle",
+  "AnalysisNewsArticle",
+  "AdvertiserContentArticle",
+  "ReportageNewsArticle",
+  "OpinionNewsArticle",
+  "LiveBlogPosting",
+  "ReviewNewsArticle",
+  "BackgroundNewsArticle",
+  "AskPublicNewsArticle",
+  "SocialMediaPosting",
+  "SatiricalArticle",
+  "MedicalScholarlyArticle",
+]);
+
+const TRACKING_PARAMS = new Set([
+  "fbclid",
+  "gclid",
+  "dclid",
+  "msclkid",
+  "yclid",
+  "mc_cid",
+  "mc_eid",
+  "ref",
+  "ref_src",
+  "ref_url",
+  "source",
+  "src",
+  "from",
+  "s",
+  "smid",
+  "igshid",
+  "twclid",
+  "share",
+  "cmp",
+  "cmpid",
+  "ocid",
+  "ncid",
+  "guccounter",
+  "guce_referrer",
+  "guce_referrer_sig",
+  "_hsenc",
+  "_hsmi",
+  "mkt_tok",
+]);
+
+function cleanJsonLdText(raw: string): string {
+  let cleaned = raw.replace(/^\uFEFF+/, "").trim();
+  for (;;) {
+    const prev = cleaned;
+    if (cleaned.length >= 7 && cleaned.startsWith("<!--") && cleaned.endsWith("-->")) {
+      cleaned = cleaned.slice(4, -3).trim();
+    } else if (cleaned.length >= 12 && cleaned.startsWith("<![CDATA[") && cleaned.endsWith("]]>")) {
+      cleaned = cleaned.slice(9, -3).trim();
+    } else if (/^\/\*\s*<!\[CDATA\[\s*\*\//.test(cleaned) && /\/\*\s*\]\]>\s*\*\/$/.test(cleaned)) {
+      cleaned = cleaned
+        .replace(/^\/\*\s*<!\[CDATA\[\s*\*\//, "")
+        .replace(/\/\*\s*\]\]>\s*\*\/$/, "")
+        .trim();
+    }
+    if (cleaned === prev) break;
+  }
+  return cleaned;
+}
 
 type WalkEntry = { value: unknown; path: string; depth: number };
 
@@ -38,7 +109,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     if (script.type !== "application/ld+json") continue;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(script.text) as unknown;
+      parsed = JSON.parse(cleanJsonLdText(script.text)) as unknown;
     } catch {
       context.issues.push({ sourcePath: script.path, message: "Malformed JSON-LD" });
       continue;
@@ -134,18 +205,14 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
           .forEach((item, index) => queue.push({ value: item, path: `${current.path}[${index}]` }));
       } else {
         const object = isRecord(current.value) ? current.value : undefined;
-        const isReferenceString =
-          typeof current.value === "string" && /^(?:#|\/|\.\/|\.\.\/|[a-z][a-z0-9+.-]*:)/i.test(current.value);
+        const isReferenceString = typeof current.value === "string" && REFERENCE_STRING.test(current.value);
         const rawId = object ? text(object["@id"]) : isReferenceString ? (current.value as string) : undefined;
         const id = rawId ? resolveId(rawId, context) : undefined;
         if (id) {
           output.push(...resolveReferences(id, object ? { value: object, path: current.path } : undefined));
         } else if (object && (isEntity(object) || isSubstantive(object))) {
           output.push({ value: object, path: current.path });
-        } else if (
-          typeof current.value === "string" &&
-          !/^(?:#|\/|\.\/|\.\.\/|[a-z][a-z0-9+.-]*:)/i.test(current.value)
-        ) {
+        } else if (typeof current.value === "string" && !REFERENCE_STRING.test(current.value)) {
           const name = text(current.value);
           if (name) output.push({ value: { name }, path: current.path, fieldPaths: { name: current.path } });
         }
@@ -164,6 +231,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
   const primaryPersonKeys = new Set<string>();
   const primaryPersonScopes = new Map<string, ValueEvidence["scope"]>();
   const primaryPersonGroups = new Map<string, string[]>();
+  const hasProfilePage = entities.some((item) => schemaTypes(item.value["@type"]).has("ProfilePage"));
   const rootArticleEntries = entities.filter(
     (item) => isArticleType(schemaTypes(item.value["@type"])) && rootPaths.has(item.path),
   );
@@ -172,37 +240,21 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     return types.has("Person") || types.has("Author");
   });
   const personIdentityKeys = new Set(personEntries.map((item) => entityKey(item.value, item.path, context)));
+  const sharedExplicitUrlFor = (entity: Entity): string | undefined => {
+    const rawId = text(entity["@id"]);
+    const id = rawId ? resolveId(rawId, context) : undefined;
+    if (!id) return undefined;
+    const urls = new Set<string>();
+    for (const ref of references.get(id) ?? []) {
+      const url = httpUrl(ref.value.url, context.baseUrl);
+      if (url) urls.add(url);
+    }
+    return urls.size === 1 ? urls.values().next().value : undefined;
+  };
+  const publisherMatchingArticlePaths = new Set<string>();
   for (const entry of entities) {
     const entity = entry.value;
     const types = schemaTypes(entity["@type"]);
-    if (types.has("ProfilePage")) {
-      for (const linked of getLinked(entity.mainEntity, `${entry.path}.mainEntity`)) {
-        if (isRelatedPerson(linked.value)) {
-          const key = entityKey(linked.value, linked.path, context);
-          primaryPersonKeys.add(key);
-          primaryPersonScopes.set(key, "profile");
-        }
-      }
-    }
-    if (
-      isArticleType(types) &&
-      isCurrentArticle(entity, context, rootArticleEntries.length === 1 && rootPaths.has(entry.path))
-    ) {
-      const articleId = text(entity["@id"]);
-      const groupIdentity = articleId
-        ? (resolveId(articleId, context) ?? articleId)
-        : (httpUrl(entity.url, context.baseUrl) ?? entry.path);
-      const group = `json-ld:${groupIdentity}`;
-      for (const linked of getLinked(entity.author, `${entry.path}.author`)) {
-        if (!isRelatedPerson(linked.value)) continue;
-        const key = entityKey(linked.value, linked.path, context);
-        primaryPersonKeys.add(key);
-        primaryPersonScopes.set(key, "byline");
-        const groups = primaryPersonGroups.get(key) ?? [];
-        if (!groups.includes(group)) groups.push(group);
-        primaryPersonGroups.set(key, groups);
-      }
-    }
     if (isArticleType(types) && isAuthorProfileUrl(context.pageUrl)) {
       const authors = getLinked(entity.author, `${entry.path}.author`);
       const publishers = getLinked(entity.publisher, `${entry.path}.publisher`);
@@ -217,12 +269,48 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
               authorName.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase(),
         );
         if (matchesPublisher) {
+          publisherMatchingArticlePaths.add(entry.path);
           const sourcePath = author.fieldPaths?.name ?? `${author.path}.name`;
           context.issues.push({
             sourcePath,
             message: "JSON-LD person matches publisher on an author profile; not accepted as the page author",
           });
         }
+      }
+    }
+    if (types.has("ProfilePage")) {
+      for (const linked of getLinked(entity.mainEntity, `${entry.path}.mainEntity`)) {
+        if (isRelatedPerson(linked.value)) {
+          const key = entityKey(linked.value, linked.path, context);
+          primaryPersonKeys.add(key);
+          primaryPersonScopes.set(key, "profile");
+        }
+      }
+    }
+    if (
+      isArticleType(types) &&
+      isCurrentArticle(
+        entity,
+        context,
+        rootArticleEntries.length === 1 && rootPaths.has(entry.path),
+        hasProfilePage,
+        publisherMatchingArticlePaths.has(entry.path),
+        resolveReferences,
+      )
+    ) {
+      const articleId = text(entity["@id"]);
+      const groupIdentity = articleId
+        ? (resolveId(articleId, context) ?? articleId)
+        : (httpUrl(entity.url, context.baseUrl) ?? entry.path);
+      const group = `json-ld:${groupIdentity}`;
+      for (const linked of getLinked(entity.author, `${entry.path}.author`)) {
+        if (!isRelatedPerson(linked.value)) continue;
+        const key = entityKey(linked.value, linked.path, context);
+        primaryPersonKeys.add(key);
+        primaryPersonScopes.set(key, "byline");
+        const groups = primaryPersonGroups.get(key) ?? [];
+        if (!groups.includes(group)) groups.push(group);
+        primaryPersonGroups.set(key, groups);
       }
     }
   }
@@ -248,7 +336,15 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
           personMatchesPage(fragment.value, context);
         const primary = primaryPersonKeys.has(key) || rootProfile || pageBound;
         const scope = primaryPersonScopes.get(key) ?? (pageBound ? "profile" : "page");
-        const candidate = personCandidate(fragment.value, fragment.path, context, primary, scope, fragment.fieldPaths);
+        const candidate = personCandidate(
+          fragment.value,
+          fragment.path,
+          context,
+          primary,
+          scope,
+          fragment.fieldPaths,
+          sharedExplicitUrlFor(fragment.value),
+        );
         if (!candidate) continue;
         const groups = primaryPersonGroups.get(key);
         if (groups?.length) candidate.authorshipGroups = [...groups];
@@ -260,18 +356,41 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     if (types.has("ProfilePage")) {
       for (const linked of getLinked(entity.mainEntity, `${entry.path}.mainEntity`)) {
         if (!isRelatedPerson(linked.value) || emitted.has(linked.path)) continue;
-        const candidate = personCandidate(linked.value, linked.path, context, true, "profile", linked.fieldPaths);
+        const candidate = personCandidate(
+          linked.value,
+          linked.path,
+          context,
+          true,
+          "profile",
+          linked.fieldPaths,
+          sharedExplicitUrlFor(linked.value),
+        );
         if (!candidate) continue;
         emitted.add(linked.path);
         result.authors.push(candidate);
       }
     }
     if (isArticleType(types)) {
-      const current = isCurrentArticle(entity, context, rootArticleEntries.length === 1 && rootPaths.has(entry.path));
+      const current = isCurrentArticle(
+        entity,
+        context,
+        rootArticleEntries.length === 1 && rootPaths.has(entry.path),
+        hasProfilePage,
+        publisherMatchingArticlePaths.has(entry.path),
+        resolveReferences,
+      );
       if (current) {
         for (const linked of getLinked(entity.author, `${entry.path}.author`)) {
           if (!isRelatedPerson(linked.value) || emitted.has(linked.path)) continue;
-          const candidate = personCandidate(linked.value, linked.path, context, true, "byline", linked.fieldPaths);
+          const candidate = personCandidate(
+            linked.value,
+            linked.path,
+            context,
+            true,
+            "byline",
+            linked.fieldPaths,
+            sharedExplicitUrlFor(linked.value),
+          );
           if (!candidate) continue;
           const groups = primaryPersonGroups.get(entityKey(linked.value, linked.path, context));
           if (groups?.length) candidate.authorshipGroups = [...groups];
@@ -279,7 +398,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
           result.authors.push(candidate);
         }
       }
-      const article = articleCandidate(entity, entry.path, context);
+      const article = articleCandidate(entity, entry.path, context, resolveReferences, current);
       if (article && (current || isAuthorProfileUrl(context.pageUrl))) result.articles.push(article);
       if (current) {
         for (const [key, field] of [
@@ -329,31 +448,96 @@ function schemaTypes(value: unknown): Set<string> {
 }
 
 function isArticleType(types: Set<string>): boolean {
-  return [
-    "Article",
-    "NewsArticle",
-    "BlogPosting",
-    "Report",
-    "ScholarlyArticle",
-    "TechArticle",
-    "AnalysisNewsArticle",
-    "AdvertiserContentArticle",
-    "ReportageNewsArticle",
-  ].some((type) => types.has(type));
+  for (const type of types) {
+    if (ARTICLE_TYPES.has(type)) return true;
+  }
+  return false;
 }
 
-function isCurrentArticle(entity: Entity, context: PageContext, isRootArticle: boolean): boolean {
-  if (isAuthorProfileUrl(context.pageUrl)) return false;
-  const raw = entity.url ?? entity.mainEntityOfPage;
-  const candidate =
-    typeof raw === "string"
-      ? httpUrl(raw, context.baseUrl)
-      : isRecord(raw)
-        ? httpUrl(raw["@id"] ?? raw.url, context.baseUrl)
-        : undefined;
-  if (candidate && isAuthorProfileUrl(candidate)) return false;
-  if (candidate && pageMatches(candidate, context)) return true;
-  if (raw !== undefined && raw !== null) return false;
+function isTrackingParam(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.startsWith("utm_") || TRACKING_PARAMS.has(lower);
+}
+
+function canonicalSearch(searchParams: URLSearchParams): string {
+  const kept: Array<[string, string]> = [];
+  for (const [key, value] of searchParams.entries()) {
+    if (!isTrackingParam(key)) kept.push([key, value]);
+  }
+  if (!kept.length) return "";
+  kept.sort(([aKey, aVal], [bKey, bVal]) =>
+    aKey < bKey ? -1 : aKey > bKey ? 1 : aVal < bVal ? -1 : aVal > bVal ? 1 : 0,
+  );
+  const canonical = new URLSearchParams();
+  for (const [key, value] of kept) canonical.append(key, value);
+  return `?${canonical.toString()}`;
+}
+
+function resolveArticleUrls(
+  entity: Entity,
+  context: PageContext,
+  resolveReferences: (id: string, local?: IndexedEntity) => IndexedEntity[],
+): { explicit: boolean; urls: string[]; field?: string } {
+  const rawEntityUrl = typeof entity.url === "string" && entity.url.trim() === "" ? undefined : entity.url;
+  if (rawEntityUrl !== undefined && rawEntityUrl !== null) {
+    const direct = typeof rawEntityUrl === "string" ? httpUrl(rawEntityUrl, context.baseUrl) : undefined;
+    return { explicit: true, urls: direct ? [direct] : [], field: "url" };
+  }
+  const rawMain = entity.mainEntityOfPage;
+  if (rawMain === undefined || rawMain === null) {
+    return { explicit: false, urls: [] };
+  }
+  if (typeof rawMain === "string") {
+    const trimmed = rawMain.trim();
+    if (!trimmed) return { explicit: false, urls: [] };
+    const urls: string[] = [];
+    const direct = httpIdUrl(trimmed, context.baseUrl);
+    const refId = resolveId(trimmed, context);
+    if (refId) {
+      for (const ref of resolveReferences(refId)) {
+        const refUrl = httpUrl(ref.value.url, context.baseUrl);
+        if (refUrl && !urls.includes(refUrl)) urls.push(refUrl);
+      }
+    }
+    if (direct && !urls.includes(direct)) urls.push(direct);
+    return { explicit: true, urls, field: "mainEntityOfPage" };
+  }
+  if (isRecord(rawMain)) {
+    const urls: string[] = [];
+    const directUrl = httpUrl(rawMain.url, context.baseUrl);
+    if (directUrl) urls.push(directUrl);
+    const rawRefId = text(rawMain["@id"]);
+    const refId = rawRefId ? resolveId(rawRefId, context) : undefined;
+    if (refId) {
+      for (const ref of resolveReferences(refId)) {
+        const refUrl = httpUrl(ref.value.url, context.baseUrl);
+        if (refUrl && !urls.includes(refUrl)) urls.push(refUrl);
+      }
+    }
+    const directIdUrl = httpIdUrl(rawRefId, context.baseUrl);
+    if (directIdUrl && !urls.includes(directIdUrl)) urls.push(directIdUrl);
+    const field = rawMain.url ? "mainEntityOfPage.url" : rawMain["@id"] ? "mainEntityOfPage.@id" : "mainEntityOfPage";
+    return { explicit: true, urls, field };
+  }
+  return { explicit: true, urls: [] };
+}
+
+function isCurrentArticle(
+  entity: Entity,
+  context: PageContext,
+  isRootArticle: boolean,
+  hasProfilePage: boolean,
+  matchesPublisherOnProfile: boolean,
+  resolveReferences: (id: string, local?: IndexedEntity) => IndexedEntity[],
+): boolean {
+  const { explicit, urls } = resolveArticleUrls(entity, context, resolveReferences);
+  if (isAuthorProfileUrl(context.pageUrl)) {
+    if (hasProfilePage || matchesPublisherOnProfile || !explicit) return false;
+    return urls.some((candidate) => pageMatches(candidate, context));
+  }
+  if (urls.some((candidate) => isAuthorProfileUrl(candidate))) return false;
+  if (urls.some((candidate) => pageMatches(candidate, context))) return true;
+  if (explicit) return false;
   return isRootArticle;
 }
 
@@ -367,20 +551,21 @@ function pageMatches(candidate: string, context: PageContext): boolean {
   return urls.some((value) => {
     const normalized = httpUrl(value, context.baseUrl);
     const other = normalized ? comparablePage(normalized) : undefined;
-    return !!other && other.host === target.host && other.path === target.path;
+    return !!other && other.host === target.host && other.path === target.path && other.search === target.search;
   });
 }
 
-/** Compare the identifying parts of a page URL: host + path. Tracking query
- * strings, fragments, a trailing slash, `www.`, and http/https differences do
- * not make the same story a different page. */
-function comparablePage(value: string): { host: string; path: string } | undefined {
+/** Compare the identifying parts of a page URL: host, path, and non-tracking
+ * query parameters. Tracking query strings, fragments, a trailing slash, `www.`,
+ * and http/https differences do not make the same story a different page. */
+function comparablePage(value: string): { host: string; path: string; search: string } | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
     return {
       host: url.hostname.toLowerCase().replace(/^www\./, ""),
       path: (url.pathname.replace(/\/+$/, "") || "/").toLowerCase(),
+      search: canonicalSearch(url.searchParams),
     };
   } catch {
     return undefined;
@@ -391,9 +576,19 @@ function personMatchesPage(entity: Entity, context: PageContext): boolean {
   const profileUrl = httpUrl(entity.url, context.baseUrl);
   return profileUrl ? pageMatches(profileUrl, context) : false;
 }
-function resolveId(id: string, context: PageContext): string | undefined {
-  return httpUrl(id, context.baseUrl);
+
+function httpIdUrl(value: unknown, baseUrl: string): string | undefined {
+  const raw = text(value);
+  if (!raw || /^_:/i.test(raw)) return undefined;
+  return httpUrl(raw, baseUrl);
 }
+
+function resolveId(id: string, context: PageContext): string | undefined {
+  const trimmed = id.trim();
+  if (/^(?:urn:|tag:|did:|_:)/i.test(trimmed)) return trimmed;
+  return httpUrl(trimmed, context.baseUrl);
+}
+
 function entityKey(entity: Entity, path: string, context: PageContext): string {
   const id = text(entity["@id"]);
   return id ? (resolveId(id, context) ?? id) : path;
@@ -406,6 +601,7 @@ function personCandidate(
   primary: boolean,
   scope: ValueEvidence["scope"],
   sourcePaths?: Record<string, string>,
+  fallbackUrl?: string,
 ): AuthorCandidate | undefined {
   const profile: Partial<AuthorProfile> = {};
   const evidence: AuthorCandidate["evidence"] = {};
@@ -420,10 +616,16 @@ function personCandidate(
       confidence: scope === "page" ? "medium" : "high",
     };
   };
-  const name = personName(entity.name);
-  if (name) put("name", name, sourcePath("name", `${path}.name`));
-  put("givenName", stripHtml(entity.givenName), sourcePath("givenName", `${path}.givenName`));
-  put("familyName", stripHtml(entity.familyName), sourcePath("familyName", `${path}.familyName`));
+  const givenName = stripHtml(entity.givenName);
+  const familyName = stripHtml(entity.familyName);
+  const directName = personName(entity.name);
+  const synthesizedName = !directName ? personName([givenName, familyName].filter(Boolean).join(" ")) : undefined;
+  const name = directName ?? synthesizedName;
+  if (name) {
+    put("name", name, directName ? sourcePath("name", `${path}.name`) : sourcePath("givenName", `${path}.givenName`));
+  }
+  put("givenName", givenName, sourcePath("givenName", `${path}.givenName`));
+  put("familyName", familyName, sourcePath("familyName", `${path}.familyName`));
   const bio = stripHtml(entity.description);
   put("bio", bio && bio.length <= MAX_BIO ? bio : undefined, sourcePath("description", `${path}.description`));
   const role = stripHtml(entity.jobTitle);
@@ -461,34 +663,36 @@ function personCandidate(
     const slug = new URL(explicitUrl).pathname.split("/").filter(Boolean).at(-1);
     if (slug) put("slug", slug, sourcePath("url", `${path}.url`));
   }
+  const idUrl = httpIdUrl(entity["@id"], context.baseUrl);
+  const preferredUrl = explicitUrl ?? fallbackUrl;
+  const identity = preferredUrl && (!idUrl || idUrl.includes("#")) ? preferredUrl : (idUrl ?? preferredUrl);
   return {
     profile,
-    identity: httpUrl(entity["@id"], context.baseUrl) ?? explicitUrl,
+    identity,
     primary,
     evidence,
     ...(socialEvidence.length ? { socialEvidence } : {}),
   };
 }
 
-function articleCandidate(entity: Entity, path: string, context: PageContext): ArticleCandidate | undefined {
+function articleCandidate(
+  entity: Entity,
+  path: string,
+  context: PageContext,
+  resolveReferences: (id: string, local?: IndexedEntity) => IndexedEntity[],
+  allowProfileUrl = false,
+): ArticleCandidate | undefined {
   const headline = stripHtml(entity.headline);
   const title = headline ?? stripHtml(entity.name);
   const titleField = headline ? "headline" : "name";
-  const rawUrl = entity.url ?? entity.mainEntityOfPage;
-  const url =
-    typeof rawUrl === "string"
-      ? httpUrl(rawUrl, context.baseUrl)
-      : isRecord(rawUrl)
-        ? httpUrl(rawUrl["@id"] ?? rawUrl.url, context.baseUrl)
-        : undefined;
-  if (!title || title.length > MAX_ARTICLE_TITLE || !url || isAuthorProfileUrl(url)) return undefined;
+  const resolved = resolveArticleUrls(entity, context, resolveReferences);
+  const url = resolved.urls[0];
+  if (!title || title.length > MAX_ARTICLE_TITLE || !url || (!allowProfileUrl && isAuthorProfileUrl(url))) {
+    return undefined;
+  }
   const publishedAt = dateString(entity.datePublished);
   const article = { title, url, ...(publishedAt ? { publishedAt } : {}) };
-  const urlField = entity.url
-    ? "url"
-    : isRecord(entity.mainEntityOfPage)
-      ? `mainEntityOfPage.${entity.mainEntityOfPage["@id"] ? "@id" : "url"}`
-      : "mainEntityOfPage";
+  const urlField = resolved.field ?? "mainEntityOfPage";
   return {
     article,
     evidence: { source: "json-ld", sourcePath: path, scope: "article", confidence: "high" },
