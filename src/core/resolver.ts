@@ -147,7 +147,7 @@ function normalizedIdentity(value: string | undefined): string | undefined {
         return `https://${host}${port}${path}${search}`;
       }
     } catch {
-      // Fall back to non-URL normalization below.
+      return trimmed.replace(/\/+$/, "").toLowerCase() || undefined;
     }
   }
   return trimmed.replace(/\/+$/, "").toLowerCase() || undefined;

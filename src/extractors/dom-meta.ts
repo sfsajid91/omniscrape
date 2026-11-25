@@ -1241,12 +1241,7 @@ function normalizeArticleUrl(value: string): string {
 }
 
 function isHeadingTag(tag: string): boolean {
-  return (
-    tag.length === 2 &&
-    tag.charCodeAt(0) === 104 /* 'h' */ &&
-    tag.charCodeAt(1) >= 49 /* '1' */ &&
-    tag.charCodeAt(1) <= 54 /* '6' */
-  );
+  return tag.length === 2 && tag[0] === "h" && tag[1]! >= "1" && tag[1]! <= "6";
 }
 
 function isHeadlineElement(element: ParserElement): boolean {
