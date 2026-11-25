@@ -20,7 +20,7 @@ The `src/extractors` package contains source-specific parsing modules that extra
 - Extraction failures within individual script tags or hydration payloads do not abort parsing; malformed payloads and threshold violations are recorded into `context.issues`.
 - User sessions, editors, assignees, and account owners are filtered out from author candidates.
 - Primary author attribution requires explicit contextual linkage (e.g., `ProfilePage` `mainEntity`, current article bylines, or unambiguous root person profiles) and excludes navigation links, comments, and related stories.
-- Extracted articles from the DOM are capped at 20 unique links with titles constrained between 15 and 300 characters.
+- Extracted articles from the DOM are capped at 20 unique links with titles constrained between 8 and 300 characters.
 - Extracted URLs (canonical, profile, article, avatars, social) must normalize to valid HTTP(S) URLs without user credentials.
 - All DOM and AST traversals treat input documents as immutable.
 
