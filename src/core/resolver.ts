@@ -70,16 +70,87 @@ function candidateProvenance(
   return items;
 }
 
+const TRACKING_PARAMS = new Set([
+  "fbclid",
+  "gclid",
+  "dclid",
+  "msclkid",
+  "yclid",
+  "mc_cid",
+  "mc_eid",
+  "ref",
+  "ref_src",
+  "ref_url",
+  "source",
+  "src",
+  "from",
+  "s",
+  "smid",
+  "igshid",
+  "twclid",
+  "share",
+  "cmp",
+  "cmpid",
+  "ocid",
+  "ncid",
+  "guccounter",
+  "guce_referrer",
+  "guce_referrer_sig",
+  "_hsenc",
+  "_hsmi",
+  "mkt_tok",
+]);
+
+function isTrackingParam(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.startsWith("utm_") || TRACKING_PARAMS.has(lower);
+}
+
+function canonicalSearch(searchParams: URLSearchParams): string {
+  const kept: Array<[string, string]> = [];
+  for (const [key, value] of searchParams.entries()) {
+    if (!isTrackingParam(key)) kept.push([key, value]);
+  }
+  if (!kept.length) return "";
+  kept.sort(([aKey, aVal], [bKey, bVal]) =>
+    aKey < bKey ? -1 : aKey > bKey ? 1 : aVal < bVal ? -1 : aVal > bVal ? 1 : 0,
+  );
+  const canonical = new URLSearchParams();
+  for (const [key, value] of kept) canonical.append(key, value);
+  return `?${canonical.toString()}`;
+}
+
 function sameName(a: string | undefined, b: string | undefined): boolean {
   return !!a && !!b && normalizeName(a) === normalizeName(b);
 }
 
 function normalizeName(value: string): string {
-  return value.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function normalizedIdentity(value: string | undefined): string | undefined {
-  return value?.replace(/\/+$/, "").toLowerCase() || undefined;
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        const host = url.hostname.toLowerCase().replace(/^www\./, "");
+        const port =
+          url.port &&
+          !((url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443"))
+            ? `:${url.port}`
+            : "";
+        const path = (url.pathname.replace(/\/+$/, "") || "/").toLowerCase();
+        const search = canonicalSearch(url.searchParams);
+        return `https://${host}${port}${path}${search}`;
+      }
+    } catch {
+      // Fall back to non-URL normalization below.
+    }
+  }
+  return trimmed.replace(/\/+$/, "").toLowerCase() || undefined;
 }
 
 function slugOf(candidate: AuthorCandidate): string | undefined {
@@ -105,9 +176,14 @@ function sameIdentity(a: AuthorCandidate, b: AuthorCandidate): boolean {
   if (cms.profile.id === undefined || !source?.startsWith("hydration:")) return false;
   try {
     const profileUrl = new URL(leftIsUrl ? left : right);
-    return (
-      cms.identity === `${source.slice("hydration:".length)}@${profileUrl.host.toLowerCase()}:${String(cms.profile.id)}`
-    );
+    const prefix = `${source.slice("hydration:".length)}@`;
+    const suffix = `:${String(cms.profile.id)}`;
+    if (!cms.identity?.startsWith(prefix) || !cms.identity.endsWith(suffix)) return false;
+    const cmsHost = cms.identity
+      .slice(prefix.length, -suffix.length)
+      .toLowerCase()
+      .replace(/^www\./, "");
+    return cmsHost === profileUrl.host.toLowerCase().replace(/^www\./, "");
   } catch {
     return false;
   }
@@ -361,12 +437,26 @@ function mapCountsEqual(a: Map<string, number>, b: Map<string, number>): boolean
   return true;
 }
 
+function allNameCounts(members: AuthorCandidate[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const member of members) {
+    const name = normalizeName(member.profile.name ?? "");
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): boolean {
   const identitySet = (members: AuthorCandidate[]) =>
     members
       .map(membershipIdentity)
       .filter((value): value is string => !!value)
       .sort();
+  const leftIds = identitySet(left);
+  const rightIds = identitySet(right);
+  if ((leftIds.length === 0) !== (rightIds.length === 0)) {
+    return left.length === right.length && mapCountsEqual(allNameCounts(left), allNameCounts(right));
+  }
   const nameCounts = (members: AuthorCandidate[]) => {
     const counts = new Map<string, number>();
     for (const member of members) {
@@ -376,27 +466,24 @@ function membershipsAgree(left: AuthorCandidate[], right: AuthorCandidate[]): bo
     }
     return counts;
   };
-  return (
-    sortedStringsEqual(identitySet(left), identitySet(right)) && mapCountsEqual(nameCounts(left), nameCounts(right))
-  );
+  return sortedStringsEqual(leftIds, rightIds) && mapCountsEqual(nameCounts(left), nameCounts(right));
 }
 
 function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidate[]): boolean {
-  const remaining = [...members];
-  for (const candidate of strongest) {
-    const index = remaining.findIndex((member) => {
-      if (candidate.identity || member.identity)
+  return strongest.every((candidate) =>
+    members.some((member) => {
+      if (candidate.identity && member.identity) {
         return (
-          !!candidate.identity &&
-          !!member.identity &&
-          normalizedIdentity(candidate.identity) === normalizedIdentity(member.identity)
+          normalizedIdentity(candidate.identity) === normalizedIdentity(member.identity) &&
+          sameName(candidate.profile.name, member.profile.name)
         );
-      return sameName(candidate.profile.name, member.profile.name);
-    });
-    if (index < 0) return false;
-    remaining.splice(index, 1);
-  }
-  return true;
+      }
+      if (!candidate.identity) {
+        return sameName(candidate.profile.name, member.profile.name);
+      }
+      return false;
+    }),
+  );
 }
 
 function resolveAuthors(
@@ -404,6 +491,7 @@ function resolveAuthors(
   candidates: AuthorCandidate[],
   author: AuthorProfile,
   provenance: ProvenanceItem[],
+  review: ReviewAuthor[],
   dedupeAuthorProvenance = false,
 ): AuthorProfile[] {
   if (author.name !== "Unknown Author") {
@@ -436,11 +524,22 @@ function resolveAuthors(
       ),
     ),
   );
-  if (groups.some((members) => members.length < 2 || !containsStrongest(members, uniqueAuthorshipMembers(strongest))))
-    return [];
-  const first = groups[0];
-  if (!first || groups.some((members) => !membershipsAgree(first, members))) return [];
+  if (groups.some((members) => members.length < 2)) return [];
+  const identityCount = (members: AuthorCandidate[]) => members.filter((member) => !!member.identity).length;
+  let first = groups[0];
+  let bestIdentities = first ? identityCount(first) : -1;
+  for (let i = 1; i < groups.length; i++) {
+    const count = identityCount(groups[i]!);
+    if (count > bestIdentities) {
+      first = groups[i];
+      bestIdentities = count;
+    }
+  }
+  if (!first || groups.some((members) => !membershipsAgree(first!, members))) return [];
+  if (!containsStrongest(first, strongest)) return [];
   const authors: AuthorProfile[] = [];
+  const coAuthorProvenance: ProvenanceItem[] = [];
+  const coAuthorReview: ReviewAuthor[] = [];
   for (const [index, member] of first.entries()) {
     const matching = member.identity
       ? candidates.filter(
@@ -451,12 +550,27 @@ function resolveAuthors(
         )
       : [member];
     const authorProvenance: ProvenanceItem[] = [];
-    const resolved = resolveAuthor(context, matching, authorProvenance, [], `authors[${index}]`);
+    const authorReview: ReviewAuthor[] = [];
+    const resolved = resolveAuthor(context, matching, authorProvenance, authorReview, `authors[${index}]`);
     if (resolved.name === "Unknown Author") return [];
     authors.push(resolved);
-    provenance.push(...authorProvenance);
+    coAuthorProvenance.push(...authorProvenance);
+    coAuthorReview.push(...authorReview);
   }
+  provenance.push(...coAuthorProvenance);
+  review.push(...coAuthorReview);
   return authors;
+}
+
+function normalizeArticleUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.hash = "";
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.href;
+  } catch {
+    return raw.replace(/#.*$/, "").replace(/\/+$/, "");
+  }
 }
 
 function resolveArticles(
@@ -480,10 +594,11 @@ function resolveArticles(
   for (const source of sources) {
     for (const candidate of source.articles) {
       const { article, evidence, fieldPaths } = candidate;
-      let index = byUrl.get(article.url);
+      const normalizedUrl = normalizeArticleUrl(article.url);
+      let index = byUrl.get(normalizedUrl);
       if (index === undefined) {
         index = articles.length;
-        byUrl.set(article.url, index);
+        byUrl.set(normalizedUrl, index);
         articles.push({ ...article });
       }
       const accepted = articles[index]!;
@@ -494,7 +609,9 @@ function resolveArticles(
       } else {
         for (const field of ["title", "url", "publishedAt"] as const) {
           const value = article[field];
-          if (value === undefined || value !== accepted[field]) continue;
+          if (value === undefined) continue;
+          const matches = field === "url" ? normalizeArticleUrl(value) === normalizedUrl : value === accepted[field];
+          if (!matches) continue;
           provenance.push(
             provenanceItem(context, `articles[${index}].${field}`, value, {
               ...evidence,
@@ -508,15 +625,19 @@ function resolveArticles(
   return articles;
 }
 
+function isUtcMidnight(value: string): boolean {
+  return /T00:00:00(?:\.000)?Z$/.test(value);
+}
+
 function isDateConcordant(a: string, b: string): boolean {
   if (a === b) return true;
   const timeA = Date.parse(a);
   const timeB = Date.parse(b);
-  if (isNaN(timeA) || isNaN(timeB)) return false;
+  if (Number.isNaN(timeA) || Number.isNaN(timeB)) return false;
+  if (Math.abs(timeA - timeB) <= 60000) return true;
   const dateA = a.slice(0, 10);
   const dateB = b.slice(0, 10);
-  if (dateA !== dateB) return false;
-  return Math.abs(timeA - timeB) <= 60000;
+  return dateA === dateB && (isUtcMidnight(a) || isUtcMidnight(b));
 }
 
 function sourcePriority(source: string): number {
@@ -553,7 +674,13 @@ function resolveFields(
           typeof value === "string" &&
           isDateConcordant(existing.value, value)
         ) {
-          if (priority > existing.priority) {
+          const existingMidnight = isUtcMidnight(existing.value);
+          const incomingMidnight = isUtcMidnight(value);
+          if (existingMidnight !== incomingMidnight) {
+            if (!incomingMidnight) {
+              values.set(field, { value, priority });
+            }
+          } else if (priority > existing.priority) {
             values.set(field, { value, priority });
           }
         } else {
@@ -647,7 +774,14 @@ export function resolveParserOutput(input: ResolverInput): ParserOutput {
   const review: ReviewAuthor[] = [];
   const authorCandidates = sources.flatMap((source) => source.authors);
   const author = resolveAuthor(context, authorCandidates, collected, review);
-  const authors = resolveAuthors(context, authorCandidates, author, collected, input.dedupeAuthorProvenance ?? false);
+  const authors = resolveAuthors(
+    context,
+    authorCandidates,
+    author,
+    collected,
+    review,
+    input.dedupeAuthorProvenance ?? false,
+  );
   const articles = resolveArticles(context, sources, collected, input);
   const { editorial, metadata } = resolveFields(context, sources, collected);
   const rawProvenance = input.provenanceScope === "none" ? [] : dedupeProvenance(collected);
