@@ -32,6 +32,12 @@ function addField(
   });
 }
 
+function isValidId(value: unknown): value is string | number {
+  return (
+    (typeof value === "number" && Number.isFinite(value)) || (typeof value === "string" && value.trim().length > 0)
+  );
+}
+
 export function correlateQuintypeCollectionEntities(
   root: unknown,
   rootPath: string,
@@ -41,7 +47,7 @@ export function correlateQuintypeCollectionEntities(
 ): void {
   if (!isRecord(root)) return;
   const authorObj = isRecord(root.author) ? root.author : undefined;
-  const authorId = authorObj ? authorObj.id : undefined;
+  const authorId = authorObj && isValidId(authorObj.id) ? authorObj.id : undefined;
   const authorName = authorObj ? personName(authorObj.name ?? authorObj["author-name"]) : undefined;
 
   const explicitUrl = authorObj
@@ -59,11 +65,12 @@ export function correlateQuintypeCollectionEntities(
     explicitUrl ??
     (authorId !== undefined ? `${sourceName}@${publisherNamespace(context)}:${String(authorId)}` : undefined);
 
-  const collection = isRecord(root.authorCollection)
-    ? root.authorCollection
+  const collectionKey = isRecord(root.authorCollection)
+    ? "authorCollection"
     : isRecord(root.collection)
-      ? root.collection
+      ? "collection"
       : undefined;
+  const collection = collectionKey ? (root[collectionKey] as Record<string, unknown>) : undefined;
   if (!collection || !Array.isArray(collection.items)) return;
 
   const seenAuthorEmails = new Set<string>();
@@ -78,8 +85,9 @@ export function correlateQuintypeCollectionEntities(
     if (!isRecord(item)) continue;
     const story = isRecord(item.story) ? item.story : undefined;
     if (!story) continue;
-    const ownerId = story["owner-id"] ?? story.ownerId;
-    const itemPath = `${rootPath}.authorCollection.items[${itemIndex}].story`;
+    const rawOwnerId = story["owner-id"] ?? story.ownerId;
+    const ownerId = isValidId(rawOwnerId) ? rawOwnerId : undefined;
+    const itemPath = `${rootPath}.${collectionKey}.items[${itemIndex}].story`;
 
     const candidatesToCheck: Array<{ author: Record<string, unknown>; path: string }> = [];
 
@@ -116,7 +124,7 @@ export function correlateQuintypeCollectionEntities(
     for (const { author: cand, path: candPath } of candidatesToCheck) {
       const email = emailAddress(cand.email);
       if (!email) continue;
-      const cId = cand.id;
+      const cId = isValidId(cand.id) ? cand.id : undefined;
 
       if (authorId !== undefined && cId !== undefined && String(cId) === String(authorId)) {
         if (!seenAuthorEmails.has(email)) {
