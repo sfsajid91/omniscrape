@@ -72,6 +72,8 @@ export function correlateQuintypeCollectionEntities(
       : undefined;
   const collection = collectionKey ? (root[collectionKey] as Record<string, unknown>) : undefined;
   if (!collection || !Array.isArray(collection.items)) return;
+  if (collectionKey === "collection" && isRecord(root.story)) return;
+  const isAuthorPage = Boolean(authorObj) && !isRecord(root.story);
 
   const seenAuthorEmails = new Set<string>();
   const seenOwnerEmails = new Set<string>();
@@ -167,7 +169,7 @@ export function correlateQuintypeCollectionEntities(
         }
       }
 
-      if (ownerId !== undefined && cId !== undefined && String(cId) === String(ownerId)) {
+      if (isAuthorPage && ownerId !== undefined && cId !== undefined && String(cId) === String(ownerId)) {
         if (!seenOwnerEmails.has(email)) {
           seenOwnerEmails.add(email);
           addField(out, "editorial.ownerEmail", email, sourceName, `${candPath}.email`, "publisher");

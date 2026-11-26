@@ -3,6 +3,8 @@ import type { PageContext } from "../core/context";
 import { type AuthorCandidate, type ExtractedData, emptyExtraction, type ValueEvidence } from "../core/evidence";
 import type { ArticleItem, AuthorProfile } from "../types";
 import {
+  authorSlugFromUrl,
+  comparableHttpUrl,
   dateString,
   emailAddress,
   httpUrl,
@@ -281,6 +283,7 @@ function collect(
     inStory: boolean;
     inPost: boolean;
     inCollection: boolean;
+    inAuthorCollection: boolean;
     nonPrimary: boolean;
   };
   const stack: Walk[] = [
@@ -292,12 +295,14 @@ function collect(
       inStory: false,
       inPost: false,
       inCollection: false,
+      inAuthorCollection: false,
       nonPrimary: false,
     },
   ];
   const seen = new WeakMap<object, Set<number>>();
   const seenEditorial = new Set<string>();
   const isQuintype = source.toLowerCase().includes("quintype");
+  const quintypeAuthorPage = isQuintype && isRecord(root) && isRecord(root.author) && !isRecord(root.story);
   const blockedKeys = new Set(["user", "currentUser", "loggedInUser", "session", "viewer"]);
   const collectionKeys = new Set([
     "authorCollection",
@@ -320,6 +325,11 @@ function collect(
     "config",
     "seo-metadata",
     "seoMetadata",
+    "blog",
+    "linked-story",
+    "linked-stories",
+    "linkedStory",
+    "linkedStories",
     "related",
     "relatedStories",
     "related-stories",
@@ -345,7 +355,7 @@ function collect(
   ]);
   while (stack.length) {
     const current = stack.pop()!;
-    const { value, parentKey, depth, blocked, inStory, inPost, inCollection, nonPrimary } = current;
+    const { value, parentKey, depth, blocked, inStory, inPost, inCollection, inAuthorCollection, nonPrimary } = current;
     const path = value && typeof value === "object" ? (origins?.get(value) ?? current.path) : current.path;
     if (++budget.nodes > budget.maxNodes) {
       context.issues.push({ sourcePath: path, message: "Hydration traversal limit exceeded" });
@@ -366,7 +376,8 @@ function collect(
       (blocked ? 4 : 0) |
       (nonPrimary ? 8 : 0) |
       (explicitAuthorPath ? 16 : 0) |
-      (inPost ? 32 : 0);
+      (inPost ? 32 : 0) |
+      (inAuthorCollection ? 64 : 0);
     let contexts = seen.get(value);
     if (!contexts) {
       contexts = new Set();
@@ -375,7 +386,8 @@ function collect(
     if (contexts.has(contextKey)) continue;
     contexts.add(contextKey);
     if (Array.isArray(value)) {
-      const length = Math.min(value.length, Math.max(0, budget.maxNodes - budget.nodes));
+      const remaining = Math.max(0, budget.maxNodes - budget.nodes - stack.length);
+      const length = Math.min(value.length, remaining);
       if (length < value.length)
         context.issues.push({ sourcePath: path, message: "Hydration array traversal limit exceeded" });
       for (let i = length - 1; i >= 0; i--)
@@ -388,6 +400,7 @@ function collect(
           inStory,
           inPost,
           inCollection,
+          inAuthorCollection,
           nonPrimary,
         });
       continue;
@@ -398,9 +411,7 @@ function collect(
     const pageProfileRoute = isAuthorProfileUrl(context.pageUrl);
     const profileResourceTarget =
       isAuthorProfileResource(obj) && pageProfileRoute && !hasExplicitDifferentUrl(obj, context);
-    const inContentItem = inStory || inPost;
-    const currentRelation =
-      inContentItem && AUTHOR_KEYS.has(parentKey ?? "") && !blocked && !inCollection && !nonPrimary;
+    const currentRelation = inStory && AUTHOR_KEYS.has(parentKey ?? "") && !blocked && !inCollection && !nonPrimary;
     const profileResourceDifferent =
       isAuthorProfileResource(obj) && pageProfileRoute && hasExplicitDifferentUrl(obj, context);
     const primary =
@@ -409,7 +420,7 @@ function collect(
       !nonPrimary &&
       !explicitNonPerson &&
       !profileResourceDifferent &&
-      (currentRelation || (explicitAuthorPath && (!inContentItem || profileResourceTarget)));
+      (currentRelation || (explicitAuthorPath && (!inStory || profileResourceTarget)));
     const candidateAllowed =
       !blocked &&
       !inCollection &&
@@ -440,6 +451,7 @@ function collect(
               source,
               context,
               out,
+              false,
             );
         }
       }
@@ -468,6 +480,7 @@ function collect(
           source,
           context,
           out,
+          inPost && candidate.primary && !nonPrimary && !inCollection,
         );
     } else if (
       !(isQuintype && parentKey === "story") &&
@@ -500,12 +513,15 @@ function collect(
           source,
           context,
           out,
+          inPost && candidate.primary && !nonPrimary && !inCollection,
         );
     }
-    if (!nonPrimary) collectEditorial(obj, path, source, out, seenEditorial);
+    if (!nonPrimary && (!inCollection || inAuthorCollection)) collectEditorial(obj, path, source, out, seenEditorial);
     const isQuintypeCollection = isQuintype && obj.type === "collection";
     if (isQuintypeCollection) addArticles(obj, path, source, context, out);
-    for (const [key, child] of Object.entries(obj)) {
+    for (const key in obj) {
+      if (!Object.hasOwn(obj, key)) continue;
+      const child = obj[key];
       const childPath = `${path}.${key}`;
       if (
         collectionKeys.has(key) ||
@@ -520,6 +536,10 @@ function collect(
         typeof child === "object" &&
         !(key === "profile" && parentKey === "author" && obj.authorId !== undefined)
       ) {
+        if (budget.nodes + stack.length >= budget.maxNodes) {
+          context.issues.push({ sourcePath: path, message: "Hydration traversal limit exceeded" });
+          break;
+        }
         const cardCollection = ["cards", "feed", "teasers"].includes(key) && isStoryCardArray(child, context.baseUrl);
         const childCollection =
           inCollection ||
@@ -529,8 +549,13 @@ function collect(
           (key === "collection" && isQuintype) ||
           cardCollection ||
           (key === "content" && isListingContainer(obj));
-        const childStory = inStory || ["story", "article", "current", "entry", "blogPost"].includes(key);
+        const childStory = inStory || ["story", "article", "current", "entry", "blogPost", "post"].includes(key);
         const childPost = inPost || key === "post";
+        const childNonPrimary = nonPrimary || nonPrimaryKeys.has(key);
+        const childAuthorCollection =
+          quintypeAuthorPage &&
+          !childNonPrimary &&
+          (inAuthorCollection || (!inStory && !inCollection && (key === "authorCollection" || key === "collection")));
         stack.push({
           value: child,
           path: childPath,
@@ -540,7 +565,8 @@ function collect(
           inStory: childStory,
           inPost: childPost,
           inCollection: childCollection,
-          nonPrimary: nonPrimary || nonPrimaryKeys.has(key),
+          inAuthorCollection: childAuthorCollection,
+          nonPrimary: childNonPrimary,
         });
       }
     }
@@ -590,17 +616,17 @@ function pushAuthorCandidate(
   source: string,
   context: PageContext,
   out: ExtractedData,
+  allowPostBioEmail = false,
 ): void {
   const directEmail = emailAddress(obj.email);
   const socialEmail = isRecord(obj.socialLinks) ? emailAddress(obj.socialLinks.email) : undefined;
   const bio = profileBio(obj);
   const bioEmail = bio && emailAddress(bio);
+  const allowBioEmail = candidate.evidence.bio?.scope === "profile" || allowPostBioEmail;
   const emails = [
     ...(directEmail ? [{ value: directEmail, path: `${path}.email` }] : []),
     ...(socialEmail ? [{ value: socialEmail, path: `${path}.socialLinks.email` }] : []),
-    ...(bioEmail && candidate.profile.name && candidate.evidence.bio?.scope === "profile"
-      ? [{ value: bioEmail, path: bioPath(obj, path) }]
-      : []),
+    ...(bioEmail && candidate.profile.name && allowBioEmail ? [{ value: bioEmail, path: bioPath(obj, path) }] : []),
   ];
   const unique = [...new Map(emails.map((item) => [item.value, item])).values()];
   if (unique.length > 1) {
@@ -822,7 +848,7 @@ function authorCandidate(
   if (!profile.name) return undefined;
   const explicitUrl = [obj.profileUrl, obj.url].map((value) => httpUrl(value, context.baseUrl)).find(Boolean);
   if (!profile.slug && explicitUrl) {
-    const slug = new URL(explicitUrl).pathname.split("/").filter(Boolean).at(-1);
+    const slug = authorSlugFromUrl(explicitUrl);
     if (slug) put("slug", slug, "profileUrl");
   }
   const identity =
@@ -831,14 +857,7 @@ function authorCandidate(
 }
 
 function normalizeComparableUrl(rawUrl: string): string {
-  try {
-    const parsed = new URL(rawUrl);
-    parsed.hash = "";
-    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
-    return parsed.href;
-  } catch {
-    return rawUrl;
-  }
+  return comparableHttpUrl(rawUrl) ?? rawUrl;
 }
 
 function addArticles(value: unknown, path: string, source: string, context: PageContext, out: ExtractedData): void {
@@ -962,10 +981,15 @@ function getPath(value: unknown, path: string[]): unknown {
 function safeRaw(value: unknown, context: PageContext): unknown {
   const ancestors = new Set<object>();
   let count = 0;
+  let truncated = false;
   const maxNodes = context.limits.maxDecodeNodes;
   const maxDepth = context.limits.maxDecodeDepth;
 
   const clone = (item: unknown, depth: number): unknown => {
+    if (++count > maxNodes || depth > maxDepth) {
+      truncated = true;
+      return "[Truncated]";
+    }
     if (typeof item === "bigint") return `${item.toString()}n`;
     if (item === null || item === undefined) return item;
     if (typeof item === "number") return Number.isFinite(item) ? item : null;
@@ -974,7 +998,6 @@ function safeRaw(value: unknown, context: PageContext): unknown {
     if (typeof item !== "object") return undefined;
 
     if (ancestors.has(item)) return "[Circular]";
-    if (depth > maxDepth || ++count > maxNodes) return "[Truncated]";
 
     if (item instanceof Date) {
       return Number.isFinite(item.getTime()) ? item.toISOString() : null;
@@ -990,9 +1013,9 @@ function safeRaw(value: unknown, context: PageContext): unknown {
     try {
       if (item instanceof Set) {
         const arr: unknown[] = [];
-        let seen = 0;
         for (const entry of item) {
-          if (++seen > maxNodes) {
+          if (count >= maxNodes) {
+            truncated = true;
             arr.push("[Truncated]");
             break;
           }
@@ -1003,9 +1026,9 @@ function safeRaw(value: unknown, context: PageContext): unknown {
       }
       if (item instanceof Map) {
         const obj: Record<string, unknown> = {};
-        let seen = 0;
         for (const [k, v] of item.entries()) {
-          if (++seen > maxNodes) {
+          if (count >= maxNodes) {
+            truncated = true;
             obj["[Truncated]"] = true;
             break;
           }
@@ -1017,7 +1040,8 @@ function safeRaw(value: unknown, context: PageContext): unknown {
       if (Array.isArray(item)) {
         const arr: unknown[] = [];
         for (let i = 0; i < item.length; i++) {
-          if (i >= maxNodes) {
+          if (count >= maxNodes) {
+            truncated = true;
             arr.push("[Truncated]");
             break;
           }
@@ -1027,14 +1051,14 @@ function safeRaw(value: unknown, context: PageContext): unknown {
         return arr;
       }
       const obj: Record<string, unknown> = {};
-      const entries = Object.entries(item as Record<string, unknown>);
-      for (let i = 0; i < entries.length; i++) {
-        if (i >= maxNodes) {
+      for (const key in item as Record<string, unknown>) {
+        if (!Object.hasOwn(item, key)) continue;
+        if (count >= maxNodes) {
+          truncated = true;
           obj["[Truncated]"] = true;
           break;
         }
-        const [key, entry] = entries[i]!;
-        const cloned = clone(entry, depth + 1);
+        const cloned = clone((item as Record<string, unknown>)[key], depth + 1);
         if (cloned !== undefined) obj[key] = cloned;
       }
       return obj;
@@ -1044,7 +1068,11 @@ function safeRaw(value: unknown, context: PageContext): unknown {
   };
 
   try {
-    return clone(value, 0);
+    const result = clone(value, 0);
+    if (truncated) {
+      context.issues.push({ sourcePath: "rawHydration", message: "Raw hydration snapshot truncated" });
+    }
+    return result;
   } catch {
     return undefined;
   }

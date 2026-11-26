@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { parseHtml } from "../src/parse";
-import { dateString, decodeEntities, emailAddress, personName, socialLink, stripHtml, text } from "../src/values";
+import {
+  dateString,
+  decodeEntities,
+  emailAddress,
+  isAuthorProfileUrl,
+  personName,
+  socialLink,
+  stripHtml,
+  text,
+} from "../src/values";
 
 const base = "https://publisher.example/authors/alice";
 
@@ -84,7 +93,41 @@ describe("dateString and numericDate hardening", () => {
     expect(dateString("2024-10")).toBe("2024-10-01T00:00:00.000Z");
     expect(dateString("Mon, 04 Oct 2024 12:00:00 GMT")).toBe("2024-10-04T12:00:00.000Z");
     expect(dateString("December 05, 2024")).toBe("2024-12-05T00:00:00.000Z");
-    expect(dateString("2024/10/04")).toBeDefined();
+    expect(dateString("2024/10/04")).toBe("2024-10-04T00:00:00.000Z");
+    expect(dateString("2024.10.04")).toBe("2024-10-04T00:00:00.000Z");
+    expect(dateString("10/04/2024")).toBe("2024-10-04T00:00:00.000Z");
+    expect(dateString("2024/02/29")).toBe("2024-02-29T00:00:00.000Z");
+    expect(dateString("1st May 2024")).toBe("2024-05-01T00:00:00.000Z");
+    expect(dateString("May 2024")).toBe("2024-05-01T00:00:00.000Z");
+  });
+
+  test("accepts Date instances and rejects calendar rollovers, dot-DMY, and loose prose", () => {
+    expect(dateString(0)).toBe("1970-01-01T00:00:00.000Z");
+    expect(dateString("0")).toBeUndefined();
+    expect(dateString(new Date("2026-05-01T10:15:00Z"))).toBe("2026-05-01T10:15:00.000Z");
+    expect(dateString(new Date(Number.NaN))).toBeUndefined();
+    expect(dateString(new Date("1899-12-31T23:59:59Z"))).toBeUndefined();
+    expect(dateString(new Date("2201-01-01T00:00:00Z"))).toBeUndefined();
+
+    for (const invalid of [
+      "2026/02/29",
+      "04/31/2026",
+      "April 31, 2026",
+      "29 Feb 2026",
+      "Mon, 31 Apr 2026 12:00:00 GMT",
+      "04.10.2024",
+      "15.10.2024",
+      "She may win in 2026",
+      "Jan Doe 2026",
+    ]) {
+      expect(dateString(invalid), invalid).toBeUndefined();
+    }
+
+    expect(dateString("2024-10-04 12:00:00 GMT+06:00")).toBe("2024-10-04T06:00:00.000Z");
+    expect(dateString("2024-10-04 12:00:00 UTC+05:30")).toBe("2024-10-04T06:30:00.000Z");
+    expect(dateString("Mon, 04 Oct 2024 12:00:00 GMT+06:00")).toBe("2024-10-04T06:00:00.000Z");
+    expect(dateString("Mon, 04 Oct 2024 12:00:00 UTC+05:30")).toBe("2024-10-04T06:30:00.000Z");
+    expect(dateString("October 4, 2024 12:00:00 GMT+06:00")).toBe("2024-10-04T06:00:00.000Z");
   });
 });
 
@@ -149,6 +192,21 @@ describe("socialLink hardening", () => {
     expect(socialLink("https://mastodon.social/about", base)).toBeUndefined();
   });
 
+  test("recognizes author about pages without treating corporate about pages as profiles", () => {
+    expect(isAuthorProfileUrl("https://substack.com/@writer/about")).toBe(true);
+    expect(isAuthorProfileUrl("https://medium.com/@writer/about")).toBe(true);
+    expect(isAuthorProfileUrl("https://writer.substack.com/about")).toBe(true);
+    expect(isAuthorProfileUrl("https://medium.com/about")).toBe(false);
+    for (const url of ["https://substack.com/@writer/about", "https://writer.substack.com/about"]) {
+      const json = { "@type": "ProfilePage", mainEntity: { "@type": "Person", name: "Writer", url } };
+      const result = parseHtml({
+        html: `<script type="application/ld+json">${JSON.stringify(json)}</script>`,
+        pageUrl: url,
+      });
+      expect(result.author.slug).toBe("writer");
+    }
+  });
+
   test("normalizes localized LinkedIn and /about paths on Substack and Medium", () => {
     expect(socialLink("https://www.linkedin.com/in/alice-reporter/en", base)).toEqual({
       platform: "linkedin",
@@ -176,6 +234,40 @@ describe("socialLink hardening", () => {
       isPersonal: true,
     });
     expect(socialLink("https://medium.com/@alice/some-story", base)).toBeUndefined();
+  });
+
+  test("rejects bare @ paths, YouTube subpages, and @-prefixed reserved Twitter paths", () => {
+    for (const rejected of [
+      "https://threads.net/@",
+      "https://threads.com/@",
+      "https://youtube.com/@",
+      "https://youtube.com/@alice/videos",
+      "https://youtube.com/@alice/about",
+      "https://youtube.com/@alice/shorts",
+      "https://youtube.com/channel/UC123/videos",
+      "https://youtube.com/videos",
+      "https://youtube.com/about",
+      "https://substack.com/@",
+      "https://medium.com/@",
+      "https://medium.com/@/about",
+      "https://mastodon.social/@",
+      "https://x.com/@",
+      "https://x.com/@@@",
+      "https://x.com/@intent",
+      "https://twitter.com/@share",
+    ]) {
+      expect(socialLink(rejected, base), rejected).toBeUndefined();
+    }
+
+    expect(socialLink("https://x.com/@alice", base)).toEqual({
+      platform: "twitter",
+      url: "https://x.com/alice",
+      handle: "alice",
+      isPersonal: true,
+    });
+    expect(isAuthorProfileUrl("https://example.com/@")).toBe(false);
+    expect(isAuthorProfileUrl("https://substack.com/@")).toBe(false);
+    expect(isAuthorProfileUrl("https://example.com/@alice")).toBe(true);
   });
 
   test("rejects non-profile utility paths on X, GitHub, and Facebook", () => {
@@ -221,6 +313,18 @@ describe("decodeEntities and stripHtml hardening", () => {
     expect(decodeEntities("&hearts; &unknown; &constructor;")).toBe("♥ &unknown; &constructor;");
   });
 
+  test("preserves invalid scalar references, avoids legacy prefix corruption, and does not drop entities after many unknowns", () => {
+    expect(decodeEntities("&#xD800;&#xDFFF;&#55296;&#57343;&#0;&#x110000;")).toBe(
+      "&#xD800;&#xDFFF;&#55296;&#57343;&#0;&#x110000;",
+    );
+    expect(decodeEntities("&#xD7FF;&#xE000;&#x10FFFF;")).toBe("\uD7FF\uE000\u{10FFFF}");
+    expect(decodeEntities("&notanentity; &copycat; &regfoo;")).toBe("&notanentity; &copycat; &regfoo;");
+    expect(decodeEntities("&not; &notin; &semi; &acE; &QUOT; &amp;hearts;")).toBe('¬ ∉ ; \u223e\u0333 " &hearts;');
+
+    const manyUnknowns = Array.from({ length: 300 }, (_, i) => `&unknown${i};`).join(" ");
+    expect(decodeEntities(`${manyUnknowns} &hearts;`)).toBe(`${manyUnknowns} ♥`);
+  });
+
   test("strips script and style blocks while preserving non-tag angle brackets", () => {
     expect(stripHtml("Growth is &lt; 5% when rates are &gt; 3%")).toBe("Growth is < 5% when rates are > 3%");
     expect(stripHtml("Alice.<script>alert(1)</script><style>.a{color:red}</style> End.")).toBe("Alice. End.");
@@ -229,5 +333,40 @@ describe("decodeEntities and stripHtml hardening", () => {
     expect(stripHtml("Ren&amp;eacute; &lt;b&gt;Writer&lt;/b&gt;")).toBe("Ren&eacute; Writer");
     expect(stripHtml("Ren&amp;amp;eacute;")).toBe("Ren&amp;eacute;");
     expect(stripHtml("&lt;/tag&gt; visible")).toBe("visible");
+  });
+
+  test("handles unclosed tags, quoted attributes, Unicode offsets, angle-bracket emails, and repeated malformed inputs linearly", () => {
+    expect(stripHtml('<script>var s = "<!--";</script>Visible')).toBe("Visible");
+    expect(stripHtml('<script src="x.js"/>After')).toBe("After");
+    expect(stripHtml('<div title="a>b">hi</div>')).toBe("hi");
+    expect(stripHtml("İstanbul <script>alert(1)</script> Ankara")).toBe("İstanbul Ankara");
+    expect(stripHtml("Contact <foo@bar.com> or <foo.bar+tag@sub.example.com> or <mailto:foo@bar.com>")).toBe(
+      "Contact <foo@bar.com> or <foo.bar+tag@sub.example.com> or <mailto:foo@bar.com>",
+    );
+    expect(stripHtml("a < b and 3 < 5 > 2")).toBe("a < b and 3 < 5 > 2");
+    expect(stripHtml("Visible <script>unclosed")).toBe("Visible");
+    expect(stripHtml("Visible <style>unclosed")).toBe("Visible");
+    expect(stripHtml("Visible <!-- unclosed")).toBe("Visible");
+    expect(stripHtml("Visible &lt;script&gt;unclosed")).toBe("Visible");
+    expect(stripHtml("<script src=https://cdn.example/a.js/>alert(1)</script>Visible")).toBe("Visible");
+    expect(stripHtml("<script data=foo/>secret")).toBeUndefined();
+    expect(stripHtml("<style href=a/>body{color:red}</style>Visible")).toBe("Visible");
+    expect(stripHtml("<b>hi</b/>")).toBe("hi");
+    expect(stripHtml("<b>hi</b foo>")).toBe("hi");
+    expect(stripHtml('<b>hi</b title="a>b">there')).toBe("hi there");
+    expect(stripHtml("&lt;/b/&gt; visible")).toBe("visible");
+    expect(stripHtml("&lt;/b foo&gt; visible")).toBe("visible");
+
+    for (const payload of [
+      "<script>".repeat(20_000),
+      "<style>".repeat(20_000),
+      "<!--".repeat(20_000),
+      "<a ".repeat(20_000),
+      `${'<a x=">'.repeat(5_000)} z='>`,
+    ]) {
+      const started = performance.now();
+      stripHtml(payload);
+      expect(performance.now() - started).toBeLessThan(250);
+    }
   });
 });

@@ -66,10 +66,10 @@ export function evaluateStatic(
       return cooked;
     }
     case "Identifier":
+      if (env.has(String(node.name))) return env.get(String(node.name));
       if (node.name === "undefined") return undefined;
       if (node.name === "NaN") return Number.NaN;
       if (node.name === "Infinity") return Number.POSITIVE_INFINITY;
-      if (env.has(String(node.name))) return env.get(String(node.name));
       throw new Error("Unsupported identifier");
     case "ArrayExpression":
       return (node.elements as Array<AstNode | null>).map((item) =>
@@ -96,7 +96,7 @@ export function evaluateStatic(
     }
     case "NewExpression": {
       const callee = node.callee as AstNode;
-      if (callee.type !== "Identifier" || callee.name !== "Date") {
+      if (callee.type !== "Identifier" || callee.name !== "Date" || env.has("Date")) {
         throw new Error("Unsupported new expression");
       }
       const args = (node.arguments as AstNode[]).map((arg) => evaluateStatic(arg, env, depth + 1, budget));
@@ -113,8 +113,11 @@ export function evaluateStatic(
       const callee = node.callee as AstNode;
       if (
         callee.type === "MemberExpression" &&
+        !callee.computed &&
         (callee.object as AstNode).type === "Identifier" &&
         (callee.object as AstNode).name === "JSON" &&
+        !env.has("JSON") &&
+        (callee.property as AstNode).type === "Identifier" &&
         (callee.property as AstNode).name === "parse"
       ) {
         const args = node.arguments as AstNode[];

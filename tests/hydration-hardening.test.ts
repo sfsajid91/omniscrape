@@ -406,5 +406,337 @@ describe("Issue #15 hydration & Flight hardening", () => {
       expect(emptyIdResult.author.email).toBeUndefined();
       expect(emptyIdResult.editorial.ownerEmail).toBeUndefined();
     });
+
+    test("isolates Quintype linked-story and sidebar collection editorial fields from main story and section pages", () => {
+      const storyWithSidebar = parseHtml({
+        html: `<script id="static-page">${JSON.stringify({
+          qt: {
+            data: {
+              story: {
+                id: "main-story",
+                title: "Main Story",
+                slug: "main-story",
+                "author-name": "Main Reporter",
+                "author-id": "rep-1",
+                "owner-id": 10,
+                "owner-name": "Main Owner",
+                "publisher-name": "Main Daily",
+                cards: [
+                  {
+                    "story-elements": [
+                      {
+                        metadata: {
+                          "linked-story": {
+                            "owner-name": "Linked Owner",
+                            "publisher-name": "Linked Daily",
+                            authors: [{ id: 20, name: "Linked Author" }],
+                          },
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+              collection: {
+                items: [
+                  {
+                    story: {
+                      id: "sidebar-story",
+                      title: "Sidebar Story",
+                      slug: "sidebar-story",
+                      "owner-id": 99,
+                      "owner-name": "Sidebar Owner",
+                      "publisher-name": "Sidebar Daily",
+                      authors: [{ id: 99, name: "Sidebar Owner", email: "sidebar-owner@example.org" }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        })}</script>`,
+        pageUrl: "https://publisher.example/stories/main-story",
+      });
+      expect(storyWithSidebar.author.name).toBe("Main Reporter");
+      expect(storyWithSidebar.editorial).toEqual({
+        ownerName: "Main Owner",
+        ownerId: 10,
+        publisher: "Main Daily",
+      });
+      expect(storyWithSidebar.issues).toEqual([]);
+
+      const sectionPage = parseHtml({
+        html: `<script id="static-page">${JSON.stringify({
+          qt: {
+            data: {
+              collection: {
+                items: [
+                  {
+                    story: {
+                      id: "card-1",
+                      title: "Section Card",
+                      slug: "section-card",
+                      "owner-id": 55,
+                      "owner-name": "Section Owner",
+                      authors: [{ id: 55, name: "Section Owner", email: "section-owner@example.org" }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        })}</script>`,
+        pageUrl: "https://publisher.example/news",
+      });
+      expect(sectionPage.editorial.ownerEmail).toBeUndefined();
+      expect(sectionPage.editorial.ownerName).toBeUndefined();
+    });
+  });
+
+  describe("unit 3 hardening regressions", () => {
+    test("bounds rawHydration primitive DAG clones and Nuxt preflight shallow-alias / wide-object edges", () => {
+      const nuxtPrimitiveDag = JSON.stringify([
+        [1, 1, 2, 2],
+        Array.from({ length: 1600 }, () => 3),
+        Array.from({ length: 1600 }, () => 3),
+        1,
+      ]);
+      const dagResult = parseHtml({
+        html: `<script id="__NUXT_DATA__">${nuxtPrimitiveDag}</script>`,
+        pageUrl: storyUrl,
+        includeRawHydration: true,
+        maxDecodeNodes: 4000,
+      });
+      expect(JSON.stringify(dagResult.rawHydration)).toContain("[Truncated]");
+      expect(dagResult.issues.some(({ message }) => message === "Raw hydration snapshot truncated")).toBe(true);
+
+      const nuxt2PrimitiveIife = parseHtml({
+        html: `<script>window.__NUXT__ = (function(a){return {first:a,second:a,author:{name:"IIFE Bounded"}}}([${Array.from({ length: 1600 }, (_, i) => i).join(",")}]));</script>`,
+        pageUrl: storyUrl,
+        includeRawHydration: true,
+        maxDecodeNodes: 2000,
+      });
+      expect(JSON.stringify(nuxt2PrimitiveIife.rawHydration)).toContain("[Truncated]");
+      expect(nuxt2PrimitiveIife.issues.some(({ message }) => message === "Raw hydration snapshot truncated")).toBe(
+        true,
+      );
+
+      // Deep path appears first, shallow alias appears second: shallow alias must not mask deeper path.
+      const deepBeforeShallow = JSON.stringify([
+        { deep: 2, shallow: 1 },
+        { nested: 3 },
+        { a: 4 },
+        { leaf: 5 },
+        { b: 1 },
+        "Deep Alias Writer",
+      ]);
+      const shallowMaskAttempt = parseHtml({
+        html: `<script id="__NUXT_DATA__">${deepBeforeShallow}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeDepth: 4,
+      });
+      expect(shallowMaskAttempt.issues.some(({ message }) => message.includes("Nuxt devalue decode failed"))).toBe(
+        true,
+      );
+
+      const wideObj = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, 1]));
+      const wideNuxt = JSON.stringify([wideObj, "val"]);
+      const wideResult = parseHtml({
+        html: `<script id="__NUXT_DATA__">${wideNuxt}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeNodes: 10,
+      });
+      expect(wideResult.issues.some(({ message }) => message.includes("Nuxt devalue decode failed"))).toBe(true);
+    });
+
+    test("blocks shallow-first Nuxt DAG depth bypasses across objects, swapped keys, Set, and Map while preserving cycles and DAG speed", () => {
+      const shallowFirstGraphs: Array<[string, string]> = [
+        [
+          "object shallow-first",
+          JSON.stringify([{ a: 3, b: 1 }, { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, "end"]),
+        ],
+        [
+          "object swapped keys",
+          JSON.stringify([{ b: 1, a: 3 }, { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, "end"]),
+        ],
+        ["Set", JSON.stringify([["Set", 3, 1], { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, "end"])],
+        [
+          "Map values",
+          JSON.stringify([["Map", 7, 3, 8, 1], { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, "end", "k1", "k2"]),
+        ],
+        [
+          "Map keys",
+          JSON.stringify([["Map", 3, 7, 1, 7], { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, "end", "v"]),
+        ],
+      ];
+      for (const [label, payload] of shallowFirstGraphs) {
+        const res = parseHtml({
+          html: `<script id="__NUXT_DATA__">${payload}</script>`,
+          pageUrl: storyUrl,
+          maxDecodeDepth: 4,
+        });
+        expect(
+          res.issues.some(({ message }) => message.includes("Nuxt devalue decode failed")),
+          label,
+        ).toBe(true);
+      }
+
+      const shallowFirstValid = parseHtml({
+        html: `<script id="__NUXT_DATA__">${JSON.stringify([{ a: 3, b: 1 }, { x: 2 }, { x: 3 }, { x: 4 }, { x: 5 }, { x: 6 }, { author: 7 }, { name: 8 }, "Valid Depth Author"])}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeDepth: 8,
+      });
+      expect(shallowFirstValid.author.name).toBe("Valid Depth Author");
+
+      // Valid cycle with mutual references (Author <-> Articles) remains allowed.
+      const mutualCycle = parseHtml({
+        html: `<script id="__NUXT_DATA__">${JSON.stringify([
+          { author: 1, articles: 2 },
+          { name: 5, articles: 2 },
+          [3, 4],
+          { title: 6, url: 7, author: 1 },
+          { title: 8, url: 9, author: 1 },
+          "Hub Cycle Author",
+          "Article One",
+          "https://publisher.example/one",
+          "Article Two",
+          "https://publisher.example/two",
+        ])}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeDepth: 5,
+      });
+      expect(mutualCycle.author.name).toBe("Hub Cycle Author");
+      expect(mutualCycle.issues.some(({ message }) => message.includes("Nuxt devalue decode failed"))).toBe(false);
+
+      // Triangle-chain DAG must not expand exponentially.
+      const dagNodes: unknown[] = [];
+      const chainLen = 30;
+      for (let i = 0; i < chainLen; i++) {
+        dagNodes.push({ shallow: i * 2 + 2, deep: i * 2 + 1 });
+        dagNodes.push({ next: i * 2 + 2 });
+      }
+      dagNodes.push({ author: chainLen * 2 + 1 });
+      dagNodes.push({ name: chainLen * 2 + 2 });
+      dagNodes.push("Fast DAG Author");
+      const started = performance.now();
+      const dagResult = parseHtml({
+        html: `<script id="__NUXT_DATA__">${JSON.stringify(dagNodes)}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeDepth: 128,
+      });
+      expect(performance.now() - started).toBeLessThan(150);
+      expect(dagResult.author.name).toBe("Fast DAG Author");
+    });
+
+    test("rejects a deep cyclic Nuxt graph even when shortcuts reach its nodes", () => {
+      const size = 40;
+      const root = Object.fromEntries(Array.from({ length: size }, (_, index) => [`node${index}`, index + 1]));
+      const graph = [
+        root,
+        ...Array.from({ length: size }, (_, index) => ({ next: index === size - 1 ? 0 : index + 2 })),
+      ];
+      const result = parseHtml({
+        html: `<script id="__NUXT_DATA__">${JSON.stringify(graph)}</script>`,
+        pageUrl: storyUrl,
+        maxDecodeDepth: 10,
+        maxDecodeNodes: 1000,
+        includeRawHydration: true,
+      });
+      expect(result.issues.some(({ message }) => message.includes("Nuxt graph limit"))).toBe(true);
+      expect(result.rawHydration).toEqual([]);
+    });
+
+    test("revives Nuxt 3 Date values into articles[].publishedAt", () => {
+      const serialized = JSON.stringify([
+        { author: 1, articles: 2 },
+        { name: 3 },
+        [4],
+        "Nuxt Date Writer",
+        { title: 5, url: 6, publishedAt: 7 },
+        "Nuxt Dated Article",
+        "/nuxt-dated",
+        ["Date", "2026-05-01T10:15:00.000Z"],
+      ]);
+      const result = parseHtml({
+        html: `<script id="__NUXT_DATA__">${serialized}</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(result.author.name).toBe("Nuxt Date Writer");
+      expect(result.articles).toEqual([
+        {
+          title: "Nuxt Dated Article",
+          url: "https://publisher.example/nuxt-dated",
+          publishedAt: "2026-05-01T10:15:00.000Z",
+        },
+      ]);
+    });
+
+    test("scopes pageProps.post.author as byline while preserving current post bio email", () => {
+      const conflictWithJsonLd = parseHtml({
+        html:
+          `<script id="__NEXT_DATA__">${JSON.stringify({
+            props: { pageProps: { post: { author: { name: "Post Author" } } } },
+          })}</script>` +
+          `<script type="application/ld+json">${JSON.stringify({
+            "@type": "NewsArticle",
+            url: storyUrl,
+            author: { "@type": "Person", name: "JsonLd Author" },
+          })}</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(conflictWithJsonLd.author.name).toBe("Unknown Author");
+      expect(conflictWithJsonLd.review.every(({ reason }) => reason === "ambiguous_identity")).toBe(true);
+
+      const postBioEmail = parseHtml({
+        html: `<script id="__NEXT_DATA__">${JSON.stringify({
+          props: {
+            pageProps: {
+              post: {
+                author: {
+                  name: "Post Bio Writer",
+                  bio: "Reach Post Bio Writer at postbio@example.org for tips.",
+                },
+              },
+            },
+          },
+        })}</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(postBioEmail.author).toMatchObject({
+        name: "Post Bio Writer",
+        email: "postbio@example.org",
+      });
+      expect(postBioEmail.provenance.find(({ field }) => field === "author.name")?.scope).toBe("byline");
+    });
+
+    test("handles shadowed undefined/NaN/Infinity/Date/JSON and computed JSON[parse] safely in static-eval", () => {
+      const shadowedParams = parseHtml({
+        html: `<script>window.__INITIAL_STATE__ = (function(undefined, NaN, Infinity){return {author:{name: undefined, designation: NaN, bio: Infinity}};}("Shadow Author", "Senior Reporter", "Shadowed params work cleanly."));</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(shadowedParams.author).toMatchObject({
+        name: "Shadow Author",
+        designation: "Senior Reporter",
+        bio: "Shadowed params work cleanly.",
+      });
+
+      const shadowedBuiltins = parseHtml({
+        html: `<script>window.__INITIAL_STATE__ = (function(Date, JSON){return {author:{name:"Bad"}, d: new Date("2025-01-01"), j: JSON.parse("{}")};}("fake", {}));</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(shadowedBuiltins.author.name).toBe("Unknown Author");
+      expect(
+        shadowedBuiltins.issues.some(({ message }) => message === "Unsupported static hydration initializer"),
+      ).toBe(true);
+
+      const computedJson = parseHtml({
+        html: `<script>window.__INITIAL_STATE__ = {author:{name: JSON["parse"]('"Computed"')}};</script>`,
+        pageUrl: storyUrl,
+      });
+      expect(computedJson.author.name).toBe("Unknown Author");
+      expect(computedJson.issues.some(({ message }) => message === "Unsupported static hydration initializer")).toBe(
+        true,
+      );
+    });
   });
 });

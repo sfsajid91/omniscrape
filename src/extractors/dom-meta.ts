@@ -10,8 +10,11 @@ import {
 } from "../core/evidence";
 import type { PageMetadata } from "../types";
 import {
+  authorSlugFromUrl,
+  comparableHttpUrl,
   dateString,
   emailAddress,
+  foldLatinDiacritics,
   httpUrl,
   imageUrl,
   isAuthorProfileUrl,
@@ -359,9 +362,49 @@ function splitBylineNames(raw: string, separator?: string): string[] {
   });
 }
 
+const BLOCK_TAGS = new Set([
+  "address",
+  "article",
+  "aside",
+  "blockquote",
+  "dd",
+  "div",
+  "dl",
+  "dt",
+  "fieldset",
+  "figcaption",
+  "figure",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hgroup",
+  "li",
+  "main",
+  "nav",
+  "ol",
+  "p",
+  "pre",
+  "section",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "tr",
+  "ul",
+]);
+
 function isUnwantedBylineElement(element: ParserElement): boolean {
   const tag = element.localName;
   if (tag === "button" || tag === "svg" || tag === "time") return true;
+  if (hasOrganizationItemType(element)) return true;
   if (tag === "a" && (element.getAttribute("href") ?? "").trim().toLowerCase().startsWith("mailto:")) return true;
   if (element.hasAttribute("data-email")) return true;
   if (element.getAttribute("itemprop") === "jobTitle") return true;
@@ -372,27 +415,47 @@ function isUnwantedBylineElement(element: ParserElement): boolean {
   return false;
 }
 
-function collectCleanText(node: Node, parts: string[]): void {
-  if (node.nodeType === 3 /* TEXT_NODE */) {
-    if (node.nodeValue) parts.push(node.nodeValue);
-    return;
-  }
-  if (node.nodeType === 1 /* ELEMENT_NODE */) {
-    if (isUnwantedBylineElement(node as ParserElement)) return;
-    if (parts.length > 0) parts.push(" ");
-    const contentStart = parts.length;
-    for (let child = node.firstChild; child; child = child.nextSibling) {
-      collectCleanText(child, parts);
+function collectChildrenText(parent: Node, parts: string[]): void {
+  let prevWasInline = false;
+  for (let child = parent.firstChild; child; child = child.nextSibling) {
+    if (child.nodeType === 3 /* TEXT_NODE */) {
+      if (child.nodeValue) {
+        parts.push(child.nodeValue);
+        prevWasInline = false;
+      }
+      continue;
     }
-    if (parts.length > contentStart) parts.push(" ");
+    if (child.nodeType !== 1 /* ELEMENT_NODE */) continue;
+    const el = child as ParserElement;
+    const tag = el.localName;
+    if (isUnwantedBylineElement(el) || tag === "br" || tag === "hr") {
+      if (parts.length > 0) parts.push(" ");
+      prevWasInline = false;
+      continue;
+    }
+    if (BLOCK_TAGS.has(tag)) {
+      if (parts.length > 0) parts.push(" ");
+      const blockStart = parts.length;
+      collectChildrenText(el, parts);
+      if (parts.length > blockStart) parts.push(" ");
+      prevWasInline = false;
+      continue;
+    }
+    const start = parts.length;
+    if (prevWasInline && parts.length > 0) parts.push(" ");
+    const afterSpace = parts.length;
+    collectChildrenText(el, parts);
+    if (parts.length === afterSpace) {
+      parts.length = start;
+    } else {
+      prevWasInline = true;
+    }
   }
 }
 
 function cleanBylineText(element: ParserElement): string {
   const parts: string[] = [];
-  for (let child = element.firstChild; child; child = child.nextSibling) {
-    collectCleanText(child, parts);
-  }
+  collectChildrenText(element, parts);
   return parts.join("").replace(/\s+([,;:])/g, "$1");
 }
 
@@ -468,15 +531,19 @@ const EXPLICIT_NAME_SELECTOR = EXPLICIT_NAME_SELECTORS.join(", ");
 const NAME_SELECTORS_JOINED = NAME_SELECTORS.join(", ");
 
 export function extractDomAndMeta(context: PageContext): DomMetaResult {
-  const { metadata, fields } = extractPageMetadata(context);
+  const domProfile = classifyDomProfilePage(context);
+  const { metadata, fields } = extractPageMetadata(context, domProfile.isProfilePage);
   const result = emptyExtraction();
   result.fields.push(...fields);
-  result.authors.push(...extractAuthors(context));
+  result.authors.push(...extractAuthors(context, domProfile));
   result.articles.push(...extractArticles(context));
   return { ...result, metadata };
 }
 
-function extractPageMetadata(context: PageContext): { metadata: PageMetadata; fields: FieldCandidate[] } {
+function extractPageMetadata(
+  context: PageContext,
+  isProfilePage: boolean,
+): { metadata: PageMetadata; fields: FieldCandidate[] } {
   const metadata: PageMetadata = {};
   const fields: FieldCandidate[] = [];
   const put = (key: keyof PageMetadata, value: string | undefined, sourcePath: string) => {
@@ -512,7 +579,7 @@ function extractPageMetadata(context: PageContext): { metadata: PageMetadata; fi
   else meta("language", ["og:locale"]);
   meta("publishedTime", ["article:published_time", "og:article:published_time", "pubdate"], dateString);
   if (!metadata.publishedTime) {
-    const date = visiblePublicationDate(context);
+    const date = visiblePublicationDate(context, isProfilePage);
     if (date) {
       metadata.publishedTime = date.value;
       fields.push({
@@ -526,8 +593,11 @@ function extractPageMetadata(context: PageContext): { metadata: PageMetadata; fi
   return { metadata, fields };
 }
 
-function visiblePublicationDate(context: PageContext): { value: string; path: string } | undefined {
-  if (isAuthorProfileUrl(context.pageUrl)) return undefined;
+function visiblePublicationDate(
+  context: PageContext,
+  isProfilePage: boolean,
+): { value: string; path: string } | undefined {
+  if (isProfilePage) return undefined;
   const main = Array.from(context.document.querySelectorAll("main")).find((item) => item.querySelector("h1"));
   const mainArticle =
     main &&
@@ -593,19 +663,26 @@ function parseVisibleDate(raw: string, pattern: RegExp): string | undefined {
   return dateString(`${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`);
 }
 function currentArticleUrls(context: PageContext): Set<string> {
-  const canonical = context.links.find((link) => link.rel.split(/\s+/).includes("canonical"));
-  return new Set(
-    [context.pageUrl, ...(canonical ? [httpUrl(canonical.href, context.baseUrl) ?? ""] : [])]
-      .filter(Boolean)
-      .map((value) => normalizeArticleUrl(value)),
-  );
+  const urls = new Set<string>();
+  const pageKey = comparableHttpUrl(context.pageUrl);
+  if (pageKey) urls.add(pageKey);
+  for (const link of context.links) {
+    if (!link.rel.split(/\s+/).includes("canonical")) continue;
+    const resolved = httpUrl(link.href, context.baseUrl);
+    const key = resolved ? comparableHttpUrl(resolved) : undefined;
+    if (key) urls.add(key);
+  }
+  return urls;
 }
 
 function isListingAttributionScope(scope: ParserElement, currentUrls: ReadonlySet<string>, baseUrl: string): boolean {
   const article = scope.closest("article, [role='article']");
   if (!article) return false;
-  const headingLink = article.querySelector("h1 a[href], h2 a[href], h3 a[href], h4 a[href]");
-  const headingUrl = httpUrl(headingLink?.getAttribute("href"), baseUrl);
+  const headingLink = article.querySelector(
+    "h1 a[href], h2 a[href], h3 a[href], h4 a[href], a[href] h1, a[href] h2, a[href] h3, a[href] h4",
+  );
+  const anchor = headingLink ? (headingLink.localName === "a" ? headingLink : headingLink.closest("a[href]")) : null;
+  const headingUrl = httpUrl(anchor?.getAttribute("href"), baseUrl);
   return !!headingUrl && !currentUrls.has(normalizeArticleUrl(headingUrl));
 }
 
@@ -616,19 +693,58 @@ interface GuardianProfile {
   image: ParserElement;
 }
 
+interface DomProfileClassification {
+  isProfilePage: boolean;
+  guardianProfiles: GuardianProfile[];
+}
+
+const PROFILE_HEADER_SELECTOR =
+  ".author-header, .author-profile, .author-detail, header[class*='author-page'], section[class*='author-page'], header.contentheader--archived-bio, .article-author, .author-card, [itemtype*='Person' i]";
+
+function classifyDomProfilePage(context: PageContext): DomProfileClassification {
+  if (!isAuthorProfileUrl(context.pageUrl)) {
+    return { isProfilePage: false, guardianProfiles: [] };
+  }
+  const guardianProfiles = verifiedGuardianProfiles(context);
+  let isTeamOrPeopleRoute = false;
+  try {
+    const parts = new URL(context.pageUrl).pathname
+      .replace(/\/page\/\d+\/?$/i, "/")
+      .split("/")
+      .filter(Boolean);
+    const parentSegment = parts.at(-2)?.toLowerCase();
+    isTeamOrPeopleRoute =
+      parentSegment === "team" ||
+      parentSegment === "people" ||
+      (parts[0]?.toLowerCase() === "people" && parts.length === 3 && /^\d+$/.test(parts[1]!));
+  } catch {}
+  if (!isTeamOrPeopleRoute) {
+    return { isProfilePage: true, guardianProfiles };
+  }
+  if (guardianProfiles.length > 0) {
+    return { isProfilePage: true, guardianProfiles };
+  }
+  const hasProfileHeader = Array.from(context.document.querySelectorAll(PROFILE_HEADER_SELECTOR)).some(
+    (container) =>
+      !container.closest("article, [role='article']") &&
+      !isExcludedAttributionScope(container) &&
+      !hasOrganizationItemType(container) &&
+      Array.from(container.querySelectorAll("h1, h2")).some((heading) => Boolean(text(heading.textContent))),
+  );
+  return { isProfilePage: hasProfileHeader, guardianProfiles };
+}
+
 function normalizedProfileWords(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
+  return foldLatinDiacritics(value)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
 
 function verifiedGuardianProfiles(context: PageContext): GuardianProfile[] {
   if (!isAuthorProfileUrl(context.pageUrl)) return [];
-  const pathSlug = new URL(context.pageUrl).pathname.split("/").filter(Boolean).at(-1) ?? "";
+  const pathSlug = authorSlugFromUrl(context.pageUrl) ?? "";
   let expectedSlug = pathSlug;
   try {
     expectedSlug = decodeURIComponent(pathSlug);
@@ -689,11 +805,12 @@ function nprSpeakableBio(scope: ParserElement, name: string): ParserElement | un
   return next;
 }
 
-function extractAuthors(context: PageContext): AuthorCandidate[] {
+function extractAuthors(context: PageContext, domProfile: DomProfileClassification): AuthorCandidate[] {
   const doc = context.document;
   const candidates: AuthorCandidate[] = [];
   const scopes = doc.querySelectorAll(AUTHOR_SCOPE_SELECTOR);
   const currentUrls = currentArticleUrls(context);
+  const isProfilePage = domProfile.isProfilePage;
 
   // Explicit author metadata is evidence for a byline, never an article title/description surrogate.
   const metaElements = context.authorMeta.length > 0 ? doc.querySelectorAll("meta") : undefined;
@@ -717,19 +834,19 @@ function extractAuthors(context: PageContext): AuthorCandidate[] {
   }
   for (const scope of scopes) {
     if (!isExcludedAttributionScope(scope) && !isListingAttributionScope(scope, currentUrls, context.baseUrl)) {
-      candidates.push(...authorsFromScope(scope, context, currentUrls));
+      candidates.push(...authorsFromScope(scope, context, currentUrls, isProfilePage));
     }
   }
   candidates.push(...unmarkedLinkedBylines(doc, context, currentUrls));
-  if (isAuthorProfileUrl(context.pageUrl)) {
+  if (isProfilePage) {
     for (const header of doc.querySelectorAll("header.contentheader--archived-bio")) {
       if (!isExcludedAttributionScope(header) && !isListingAttributionScope(header, currentUrls, context.baseUrl)) {
-        candidates.push(...authorsFromScope(header, context, currentUrls));
+        candidates.push(...authorsFromScope(header, context, currentUrls, isProfilePage));
       }
     }
-    for (const profile of verifiedGuardianProfiles(context)) {
+    for (const profile of domProfile.guardianProfiles) {
       if (!isListingAttributionScope(profile.scope, currentUrls, context.baseUrl)) {
-        candidates.push(...authorsFromScope(profile.scope, context, currentUrls, profile));
+        candidates.push(...authorsFromScope(profile.scope, context, currentUrls, isProfilePage, profile));
       }
     }
     const heading = doc.querySelector("h1, h2");
@@ -741,7 +858,7 @@ function extractAuthors(context: PageContext): AuthorCandidate[] {
       !isExcludedAttributionScope(wrapper) &&
       !isListingAttributionScope(wrapper, currentUrls, context.baseUrl)
     ) {
-      candidates.push(...authorsFromScope(wrapper, context, currentUrls));
+      candidates.push(...authorsFromScope(wrapper, context, currentUrls, isProfilePage));
     }
   }
   return mergeSameScopeDuplicates(candidates);
@@ -758,11 +875,11 @@ function authorsFromScope(
   scope: ParserElement,
   context: PageContext,
   currentUrls: ReadonlySet<string>,
+  profilePath: boolean,
   guardian?: GuardianProfile,
 ): AuthorCandidate[] {
   if (isListingAttributionScope(scope, currentUrls, context.baseUrl)) return [];
   if (hasOrganizationItemType(scope)) return [];
-  const profilePath = isAuthorProfileUrl(context.pageUrl);
   const bylineContainer =
     scope.closest("[role='author'], [itemprop='author'], .byline, .entry-author, .c-entry-author") ??
     (scope.matches("[rel~='author'], [data-author], [data-testid*='author' i]") ? scope : null);
@@ -874,18 +991,23 @@ function authorsFromScope(
       "high",
     ),
   };
+  const notInOrganization = (element: ParserElement) => !isInsideOrganizationScope(element, scope);
   const nprBio = archivedBioScope ? nprSpeakableBio(scope, name) : undefined;
   const bioEl =
     guardian?.biography ??
     nprBio ??
-    first(scope, [
-      "[itemprop='description']",
-      ".author-bio",
-      ".header-description",
-      ".bio",
-      ".author-description",
-      ".contributor-bio",
-    ]);
+    firstMatching(
+      scope,
+      [
+        "[itemprop='description']",
+        ".author-bio",
+        ".header-description",
+        ".bio",
+        ".author-description",
+        ".contributor-bio",
+      ],
+      notInOrganization,
+    );
   const bioText = bioEl?.querySelector("p")?.textContent ?? bioEl?.textContent;
   const bio = stripHtml(bioText);
   if (bio && bio.length > 20 && bio.length <= MAX_BIO) {
@@ -894,14 +1016,18 @@ function authorsFromScope(
   }
   const img =
     guardian?.image ??
-    first(scope, [
-      "[itemprop='image']",
-      "img.author-avatar",
-      "img.author-image",
-      "img.bio-image-image",
-      "img.author-details-avatar",
-      "img.avatar",
-    ]);
+    firstMatching(
+      scope,
+      [
+        "[itemprop='image']",
+        "img.author-avatar",
+        "img.author-image",
+        "img.bio-image-image",
+        "img.author-details-avatar",
+        "img.avatar",
+      ],
+      notInOrganization,
+    );
   const avatar = imageUrl(
     img?.getAttribute("content") ?? img?.getAttribute("src") ?? img?.getAttribute("data-src"),
     context.baseUrl,
@@ -910,7 +1036,11 @@ function authorsFromScope(
     profile.avatarUrl = avatar;
     evidence.avatarUrl = ev("dom-author", elementPath(img!), "profile", "high");
   }
-  const roleEl = first(scope, ["[itemprop='jobTitle']", ".author-title", ".author-role", ".designation"]);
+  const roleEl = firstMatching(
+    scope,
+    ["[itemprop='jobTitle']", ".author-title", ".author-role", ".designation"],
+    notInOrganization,
+  );
   const role = text(roleEl?.textContent);
   if (role && role.length <= MAX_ROLE) {
     profile.designation = role;
@@ -920,7 +1050,11 @@ function authorsFromScope(
   const socialEvidence: ValueEvidence[] = [];
   const seen = new Set<string>();
   for (const anchor of scope.querySelectorAll("a[href]")) {
-    if (isExcludedAttributionScope(anchor) || isListingAttributionScope(anchor, currentUrls, context.baseUrl)) {
+    if (
+      isExcludedAttributionScope(anchor) ||
+      isListingAttributionScope(anchor, currentUrls, context.baseUrl) ||
+      isInsideOrganizationScope(anchor, scope)
+    ) {
       continue;
     }
     const rawHref = (anchor.getAttribute("href") ?? "").trim();
@@ -953,13 +1087,16 @@ function authorsFromScope(
   const linkedProfile = scopedProfileUrl(scope, context, currentUrls);
   const identity = linkedProfile?.url ?? (pageProfileScope ? context.pageUrl : undefined);
   if (identity) {
-    profile.slug = new URL(identity).pathname.split("/").filter(Boolean).at(-1);
-    evidence.slug = ev(
-      "dom-author",
-      linkedProfile?.sourcePath ?? "pageUrl",
-      pageProfileScope ? "profile" : "byline",
-      "high",
-    );
+    const slug = authorSlugFromUrl(identity);
+    if (slug) {
+      profile.slug = slug;
+      evidence.slug = ev(
+        "dom-author",
+        linkedProfile?.sourcePath ?? "pageUrl",
+        pageProfileScope ? "profile" : "byline",
+        "high",
+      );
+    }
   }
   return [
     {
@@ -994,7 +1131,7 @@ function linkedAnchorCandidates(
     const profile: AuthorCandidate["profile"] = { name, socials: [] };
     const evidence: AuthorCandidate["evidence"] = { name: ev("dom-author", elementPath(element), "byline", "high") };
     if (identity) {
-      const slug = new URL(identity).pathname.split("/").filter(Boolean).at(-1);
+      const slug = authorSlugFromUrl(identity);
       if (slug) {
         profile.slug = slug;
         evidence.slug = ev("dom-author", `${elementPath(anchor)}@href`, "byline", "high");
@@ -1045,7 +1182,7 @@ function unmarkedLinkedBylines(
       const profile: AuthorCandidate["profile"] = { name, socials: social ? [social] : [] };
       const evidence: AuthorCandidate["evidence"] = { name: ev("dom-author", elementPath(anchor), "byline", "high") };
       if (href && !social) {
-        const slug = new URL(href).pathname.split("/").filter(Boolean).at(-1);
+        const slug = authorSlugFromUrl(href);
         if (slug) {
           profile.slug = slug;
           evidence.slug = ev("dom-author", `${elementPath(anchor)}@href`, "byline", "high");
@@ -1111,13 +1248,6 @@ function scopedProfileUrl(
   } catch {
     return undefined;
   }
-}
-function first(root: ParserElement, selectors: string[]): ParserElement | null {
-  for (const selector of selectors) {
-    const found = root.matches(selector) ? root : root.querySelector(selector);
-    if (found) return found;
-  }
-  return null;
 }
 function firstMatching(
   root: ParserElement,
@@ -1221,15 +1351,14 @@ function extractArticles(context: PageContext): ArticleCandidate[] {
 }
 
 function parseArticleUrl(value: string): { key: string; isBareHomepage: boolean; isLegal: boolean } | undefined {
+  const key = comparableHttpUrl(value);
+  if (!key) return undefined;
   try {
-    const url = new URL(value);
-    url.hash = "";
-    const normalizedPath = url.pathname.replace(/\/+$/, "") || "/";
-    url.pathname = normalizedPath;
+    const url = new URL(key);
     return {
-      key: url.href,
-      isBareHomepage: normalizedPath === "/" && !url.search,
-      isLegal: LEGAL_PATH_RE.test(normalizedPath),
+      key,
+      isBareHomepage: url.pathname === "/" && !url.search,
+      isLegal: LEGAL_PATH_RE.test(url.pathname),
     };
   } catch {
     return undefined;

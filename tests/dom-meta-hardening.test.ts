@@ -311,4 +311,163 @@ describe("DOM/meta attribution isolation and hardening", () => {
       { title: "Query-based story URL remains valid", url: "https://news.example/?p=42" },
     ]);
   });
+
+  test("preserves mid-word inline spans while separating adjacent inline, block, and unwanted elements", () => {
+    const cases: Array<[string, string]> = [
+      [`<div class="byline"><span class="first-letter">A</span>lice Smith</div>`, "Alice Smith"],
+      [`<div class="byline">Mc<span>D</span>onald</div>`, "McDonald"],
+      [`<div class="byline"><b>A</b>lice</div>`, "Alice"],
+      [`<div class="byline"><span>By</span><a><span>A</span>lice</a><span>Smith</span></div>`, "Alice Smith"],
+      [`<div class="byline">By<button>Follow</button>Alice</div>`, "Alice"],
+      [`<div class="byline"><span>By</span><svg><path/></svg><span>Alice</span></div>`, "Alice"],
+      [`<div class="byline">By<br>Alice</div>`, "Alice"],
+      [`<div class="byline"><span>By</span><span>Alice Reporter</span></div>`, "Alice Reporter"],
+    ];
+    for (const [html, expected] of cases) {
+      const result = parseHtml({ html, pageUrl: storyUrl });
+      expect(result.author.name, html).toBe(expected);
+    }
+  });
+
+  test("excludes nested Microdata Organization descendants and worksFor contacts from author names, emails, and socials", () => {
+    const soloOrgSpan = parseHtml({
+      html: `<div class="byline"><span itemscope itemtype="https://schema.org/Organization">Daily Chronicle</span></div>`,
+      pageUrl: storyUrl,
+    });
+    expect(soloOrgSpan.author.name).toBe("Unknown Author");
+    expect(soloOrgSpan.review).toEqual([]);
+
+    const personWithWorksFor = parseHtml({
+      html: `<div itemprop="author" itemscope itemtype="https://schema.org/Person">
+        <span itemprop="name">Alice Reporter</span>
+        <span itemprop="worksFor" itemscope itemtype="https://schema.org/Organization">
+          Daily Chronicle
+          <span itemprop="description">Daily Chronicle is a metropolitan newspaper founded in 1901.</span>
+          <p class="author-bio">Organization bio that is definitely longer than twenty characters.</p>
+          <img itemprop="image" src="https://news.example/org-logo.png">
+          <img class="avatar" src="https://news.example/org-avatar.png">
+          <span itemprop="jobTitle">Publisher</span>
+          <span class="designation">Media Organization</span>
+          <a href="mailto:tips@dailychronicle.example">Org Mail</a>
+          <a href="https://x.com/dailychronicle">Org X</a>
+        </span>
+      </div>`,
+      pageUrl: storyUrl,
+    });
+    expect(personWithWorksFor.author.name).toBe("Alice Reporter");
+    expect(personWithWorksFor.author.bio).toBeUndefined();
+    expect(personWithWorksFor.author.avatarUrl).toBeUndefined();
+    expect(personWithWorksFor.author.designation).toBeUndefined();
+    expect(personWithWorksFor.author.email).toBeUndefined();
+    expect(personWithWorksFor.author.socials).toEqual([]);
+  });
+
+  test("strips tracking query params in currentArticleUrls and bare-homepage checks while skipping invalid canonical links", () => {
+    const trackedPage = "https://news.example/story?id=100&utm_source=x&fbclid=1";
+    const result = parseHtml({
+      html: `<html><head>
+        <link rel="canonical" href="javascript:alert(1)">
+        <link rel="canonical" href="https://news.example/story?id=100">
+      </head><body>
+        <main>
+          <article>
+            <h1><a href="https://news.example/story?id=100">Current Tracked Story</a></h1>
+            <div class="byline">By Alice Tracked</div>
+          </article>
+          <article>
+            <h2><a href="https://news.example/story?id=200">Sibling Unrelated Story Card</a></h2>
+            <div class="byline">By Bob Sibling</div>
+          </article>
+          <article>
+            <h2><a href="https://news.example/?utm_source=nav">Tracked Bare Homepage Link</a></h2>
+          </article>
+        </main>
+      </body></html>`,
+      pageUrl: trackedPage,
+    });
+    expect(result.author.name).toBe("Alice Tracked");
+    expect(result.review).toEqual([]);
+    expect(result.articles.map(({ url }) => url)).toEqual(["https://news.example/story?id=200"]);
+  });
+
+  test("preserves article bylines, co-authors, and dates on /team/* and /people/* content pages without profile headers", () => {
+    const teamStory = parseHtml({
+      html: `<main><article>
+        <h1>Lakers win Game 7</h1>
+        <time itemprop="datePublished" datetime="2026-06-18T04:15:00Z">June 18, 2026</time>
+        <div itemprop="author" itemscope itemtype="https://schema.org/Person">
+          <span itemprop="name">Jordan Beat</span>
+        </div>
+      </article></main>`,
+      pageUrl: "https://sports.example/team/lakers-win-game-7",
+    });
+    expect(teamStory.author.name).toBe("Jordan Beat");
+    expect(teamStory.metadata.publishedTime).toBe("2026-06-18T04:15:00.000Z");
+
+    const peopleCoauthors = parseHtml({
+      html: `<main><article>
+        <h1>Celebrity Gala Recap</h1>
+        <div class="byline">By <a href="/writers/alice">Alice One</a> and <a href="/writers/bob">Bob Two</a></div>
+      </article></main>`,
+      pageUrl: "https://culture.example/people/celebrity-gala-recap",
+    });
+    expect(peopleCoauthors.authors.map(({ name }) => name)).toEqual(["Alice One", "Bob Two"]);
+
+    const teamProfile = parseHtml({
+      html: `<section class="author-profile"><h1>Jordan Beat</h1></section>
+      <main><article>
+        <h2><a href="/games/other">Other Game Recap</a></h2>
+        <div class="byline">By Card Writer</div>
+      </article></main>`,
+      pageUrl: "https://sports.example/team/jordan-beat",
+    });
+    expect(teamProfile.author.name).toBe("Jordan Beat");
+    expect(teamProfile.review).toEqual([]);
+
+    const headerlessProfileWithWrappedCard = parseHtml({
+      html: `<script type="application/ld+json">${JSON.stringify({
+        "@type": "ProfilePage",
+        mainEntity: { "@type": "Person", name: "Jordan Beat", url: "https://sports.example/team/jordan-beat" },
+      })}</script>
+      <article><a href="/games/other"><h2>Other Game Recap</h2></a><div class="byline">By Card Writer</div></article>`,
+      pageUrl: "https://sports.example/team/jordan-beat",
+    });
+    expect(headerlessProfileWithWrappedCard.author.name).toBe("Jordan Beat");
+    expect(headerlessProfileWithWrappedCard.review).toEqual([]);
+
+    const prefixedTeamStory = parseHtml({
+      html: `<main><article>
+        <h1>Lakers win Game 7</h1>
+        <time itemprop="datePublished" datetime="2026-06-18T04:15:00Z">June 18, 2026</time>
+        <div itemprop="author" itemscope itemtype="https://schema.org/Person">
+          <span itemprop="name">Jordan Beat</span>
+        </div>
+      </article></main>`,
+      pageUrl: "https://sports.example/en/team/lakers-win-game-7",
+    });
+    expect(prefixedTeamStory.author.name).toBe("Jordan Beat");
+    expect(prefixedTeamStory.metadata.publishedTime).toBe("2026-06-18T04:15:00.000Z");
+
+    const prefixedPeopleStory = parseHtml({
+      html: `<main><article>
+        <h1>Celebrity Gala Recap</h1>
+        <time pubdate datetime="2026-06-19T12:00:00Z">June 19, 2026</time>
+        <div class="byline">By <a href="/writers/alice">Alice One</a> and <a href="/writers/bob">Bob Two</a></div>
+      </article></main>`,
+      pageUrl: "https://culture.example/us/people/celebrity-gala-recap",
+    });
+    expect(prefixedPeopleStory.authors.map(({ name }) => name)).toEqual(["Alice One", "Bob Two"]);
+    expect(prefixedPeopleStory.metadata.publishedTime).toBe("2026-06-19T12:00:00.000Z");
+
+    const prefixedTeamProfile = parseHtml({
+      html: `<section class="author-profile"><h1>Jordan Beat</h1></section>
+      <main><article>
+        <h2><a href="/games/other">Other Game Recap</a></h2>
+        <div class="byline">By Card Writer</div>
+      </article></main>`,
+      pageUrl: "https://sports.example/en/team/jordan-beat",
+    });
+    expect(prefixedTeamProfile.author.name).toBe("Jordan Beat");
+    expect(prefixedTeamProfile.review).toEqual([]);
+  });
 });

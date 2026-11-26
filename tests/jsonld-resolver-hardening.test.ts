@@ -518,4 +518,453 @@ describe("Issue #15 Resolver hardening", () => {
     expect(realConflict.metadata.publishedTime).toBeUndefined();
     expect(realConflict.issues.some(({ sourcePath }) => sourcePath === "metadata.publishedTime")).toBe(true);
   });
+
+  test("preserves distinct JSON-LD fragment @ids while stripping anchors from explicit profile URLs", () => {
+    const pageUrl = "https://example.com/stories/fragments";
+    const coauthors = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@id": "https://example.com/#alice", "@type": "Person", name: "Alice One" },
+          { "@id": "https://example.com/#bob", "@type": "Person", name: "Bob Two" },
+          {
+            "@type": "NewsArticle",
+            url: pageUrl,
+            author: [{ "@id": "https://example.com/#alice" }, { "@id": "https://example.com/#bob" }],
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(coauthors.authors.map(({ name }) => name)).toEqual(["Alice One", "Bob Two"]);
+
+    const sameNameFragments = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@id": "#alex-1", "@type": "Person", name: "Alex Smith", email: "alex1@example.org" },
+          { "@id": "#alex-2", "@type": "Person", name: "Alex Smith", email: "alex2@example.org" },
+          { "@type": "NewsArticle", url: pageUrl, author: [{ "@id": "#alex-1" }, { "@id": "#alex-2" }] },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(sameNameFragments.authors.map(({ email }) => email)).toEqual(["alex1@example.org", "alex2@example.org"]);
+
+    const selfUrlFragment = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@id": "#alice", "@type": "Person", name: "Alice Frag", url: "#alice", email: "a1@example.org" },
+          { "@id": "#alice", email: "a2@example.org" },
+          { "@id": "#bob", "@type": "Person", name: "Bob Frag", url: "#bob" },
+          { "@type": "NewsArticle", url: pageUrl, author: [{ "@id": "#alice" }, { "@id": "#bob" }] },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(selfUrlFragment.authors.map(({ name }) => name)).toEqual(["Alice Frag", "Bob Frag"]);
+    expect(selfUrlFragment.authors[0]?.emails?.sort()).toEqual(["a1@example.org", "a2@example.org"]);
+
+    const trailingEmptyHash = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: { "@id": "https://example.com/#", "@type": "Person", name: "Hash Empty" },
+      }),
+      pageUrl,
+    });
+    expect(trailingEmptyHash.author.name).toBe("Hash Empty");
+
+    const explicitAnchorMerge = parseHtml({
+      html: `${ld({
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: { "@type": "Person", name: "Alice Anchor", url: "https://example.com/author/alice#bio" },
+      })}<div class="byline"><a href="https://example.com/author/alice">Alice Anchor</a><span class="designation">Editor</span></div>`,
+      pageUrl,
+    });
+    expect(explicitAnchorMerge.author).toMatchObject({ name: "Alice Anchor", designation: "Editor" });
+    expect(explicitAnchorMerge.review).toEqual([]);
+
+    const aliasedSameFragment = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@id": "https://example.com/team#alice",
+            "@type": "Person",
+            name: "Alice Alias",
+            url: "http://www.example.com/team/?utm_source=feed#alice",
+          },
+          {
+            "@id": "https://example.com/team#bob",
+            "@type": "Person",
+            name: "Bob Alias",
+            url: "http://www.example.com/team/?fbclid=99#bob",
+          },
+          {
+            "@type": "NewsArticle",
+            url: pageUrl,
+            author: [{ "@id": "https://example.com/team#alice" }, { "@id": "https://example.com/team#bob" }],
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(aliasedSameFragment.author.name).toBe("Unknown Author");
+    expect(aliasedSameFragment.authors.map(({ name }) => name)).toEqual(["Alice Alias", "Bob Alias"]);
+    expect(aliasedSameFragment.review.map(({ author }) => author.name).sort()).toEqual(["Alice Alias", "Bob Alias"]);
+
+    const fragmentVsUnrelatedExplicit = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@id": "https://example.com/team#alice",
+            "@type": "Person",
+            name: "Alice Team",
+            url: "http://www.example.com/team/?utm_source=feed#alice",
+            email: "alice@example.org",
+          },
+          {
+            "@type": "Person",
+            name: "Team Index",
+            url: "https://example.com/team",
+            email: "team@example.org",
+          },
+          {
+            "@type": "NewsArticle",
+            url: pageUrl,
+            author: { "@id": "https://example.com/team#alice" },
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(fragmentVsUnrelatedExplicit.author).toMatchObject({ name: "Alice Team", email: "alice@example.org" });
+    expect(fragmentVsUnrelatedExplicit.review.map(({ author }) => author.name)).toEqual(["Team Index"]);
+  });
+
+  test("isolates inline and @graph liveBlogUpdate nodes without demoting BreadcrumbList, citation, or mentions targets", () => {
+    const pageUrl = "https://example.com/live/election-night";
+    const inlineAndGraph = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "BreadcrumbList",
+            itemListElement: [{ "@type": "ListItem", position: 1, item: { "@id": "#main-liveblog" } }],
+          },
+          {
+            "@id": "#main-liveblog",
+            "@type": "LiveBlogPosting",
+            headline: "Main Liveblog",
+            datePublished: "2026-11-03T18:00:00Z",
+            author: { "@type": "Person", name: "Lead Anchor", url: "/author/lead" },
+            citation: { "@type": "NewsArticle", url: "https://example.com/ref-article", headline: "Ref Article" },
+            liveBlogUpdate: [
+              {
+                "@type": "BlogPosting",
+                url: `${pageUrl}#update-inline`,
+                datePublished: "2026-11-03T19:00:00Z",
+                author: { "@type": "Person", name: "Inline Updater", url: "/author/inline-updater" },
+              },
+              { "@id": "#update-graph" },
+            ],
+          },
+          {
+            "@id": "#update-graph",
+            "@type": "BlogPosting",
+            url: `${pageUrl}#update-graph`,
+            datePublished: "2026-11-03T20:00:00Z",
+            author: { "@type": "Person", name: "Graph Updater", url: "/author/graph-updater" },
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(inlineAndGraph.author.name).toBe("Lead Anchor");
+    expect(inlineAndGraph.metadata.publishedTime).toBe("2026-11-03T18:00:00.000Z");
+    expect(inlineAndGraph.review.map(({ author }) => author.name).sort()).toEqual(["Graph Updater", "Inline Updater"]);
+
+    const mainWithCitation = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "NewsArticle",
+            url: pageUrl,
+            headline: "Cited Story",
+            author: { "@type": "Person", name: "Main Writer" },
+          },
+          {
+            "@type": "NewsArticle",
+            url: "https://example.com/other",
+            citation: { "@id": "#cited" },
+            mentions: { "@type": "Person", name: "Mentioned Person" },
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(mainWithCitation.author.name).toBe("Main Writer");
+
+    const updateOnlyGraphPerson = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "LiveBlogPosting",
+            url: pageUrl,
+            headline: "Liveblog Without Main Author",
+            liveBlogUpdate: [{ "@id": "#update-1" }],
+          },
+          {
+            "@id": "#update-1",
+            "@type": "BlogPosting",
+            url: `${pageUrl}#update-1`,
+            author: { "@id": "#updater-1" },
+          },
+          {
+            "@id": "#updater-1",
+            "@type": "Person",
+            name: "Update Only Reporter",
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(updateOnlyGraphPerson.author.name).toBe("Unknown Author");
+    expect(updateOnlyGraphPerson.authors).toEqual([]);
+    expect(updateOnlyGraphPerson.review.map(({ author }) => author.name)).toEqual(["Update Only Reporter"]);
+
+    const updateOnlyInlinePageUrlPerson = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@type": "LiveBlogPosting",
+        url: pageUrl,
+        headline: "Inline Liveblog Without Main Author",
+        liveBlogUpdate: [
+          {
+            "@type": "BlogPosting",
+            url: `${pageUrl}#update-inline`,
+            author: { "@type": "Person", name: "Inline Update Only", url: `${pageUrl}#updater` },
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(updateOnlyInlinePageUrlPerson.author.name).toBe("Unknown Author");
+    expect(updateOnlyInlinePageUrlPerson.authors).toEqual([]);
+  });
+
+  test("resolves doi: @ids and By: string authors without dropping them or accepting unsafe @id schemes", () => {
+    const pageUrl = "https://example.com/stories/doi-byline";
+    const doiResult = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@graph": [
+          { "@id": "doi:10.1000/author-1", "@type": "Person", name: "Doi Researcher", email: "doi@example.org" },
+          { "@type": "NewsArticle", url: pageUrl, author: { "@id": "doi:10.1000/author-1" } },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(doiResult.author).toMatchObject({ name: "Doi Researcher", email: "doi@example.org" });
+    expect(doiResult.provenance.find(({ field }) => field === "author.name")?.entity).toBeUndefined();
+
+    const byString = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: ["By: Alice Reporter", "By:Bob Writer"],
+      }),
+      pageUrl,
+    });
+    expect(byString.authors.map(({ name }) => name)).toEqual(["Alice Reporter", "Bob Writer"]);
+
+    const unsafeId = parseHtml({
+      html: ld({
+        "@context": "https://schema.org",
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: { "@id": "javascript:alert(1)", "@type": "Person", name: "Safe Name" },
+      }),
+      pageUrl,
+    });
+    expect(unsafeId.author.name).toBe("Safe Name");
+    expect(unsafeId.provenance.find(({ field }) => field === "author.name")?.entity).toBeUndefined();
+  });
+
+  test("treats percent-encoded slug case differences as concordant without hiding distinct slugs", () => {
+    const pageUrl = "https://example.com/stories/slug-case";
+    const concordant = parseHtml({
+      html: `${ld({
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: { "@type": "Person", name: "René Writer", url: "https://example.com/author/ren%C3%A9" },
+      })}<div class="byline"><a href="https://example.com/author/ren%c3%a9">René Writer</a></div>`,
+      pageUrl,
+    });
+    expect(concordant.author.slug).toBeDefined();
+    expect(concordant.review).toEqual([]);
+
+    const rawVsEncoded = parseHtml({
+      html: `<script id="__NEXT_DATA__">${JSON.stringify({
+        props: {
+          pageProps: {
+            author: { name: "René Writer", url: "https://example.com/author/rene", slug: "rené" },
+          },
+        },
+      })}</script><div class="byline"><a href="https://example.com/author/rene" data-author="René Writer">René Writer</a></div>${ld(
+        {
+          "@type": "NewsArticle",
+          url: pageUrl,
+          author: {
+            "@type": "Person",
+            name: "René Writer",
+            url: "https://example.com/author/rene",
+            "@id": "https://example.com/author/ren%C3%A9",
+          },
+        },
+      )}`,
+      pageUrl,
+    });
+    expect(rawVsEncoded.author.name).toBe("René Writer");
+
+    const distinctSlugs = parseHtml({
+      html: `<script id="__NEXT_DATA__">${JSON.stringify({
+        props: {
+          pageProps: {
+            story: {
+              author: { name: "René Writer", url: "https://example.com/author/rene", slug: "rene-one" },
+            },
+          },
+        },
+      })}</script><script type="application/ld+json">${JSON.stringify({
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: {
+          "@type": "Person",
+          name: "René Writer",
+          url: "https://example.com/author/rene",
+        },
+      })}</script>`,
+      pageUrl,
+    });
+    expect(distinctSlugs.author.name).toBe("René Writer");
+    expect(distinctSlugs.author.slug).toBeUndefined();
+    expect(distinctSlugs.review.some(({ reason }) => reason === "conflicting_value")).toBe(true);
+  });
+
+  test("keeps Bengali, Japanese dakuten, and Cyrillic names distinct while folding Latin diacritics", () => {
+    const pageUrl = "https://example.com/stories/scripts";
+    for (const [left, right] of [
+      ["রিনা খান", "রানা খান"],
+      ["たかはし", "たがはし"],
+      ["Алексей", "Алексеи"],
+    ] as const) {
+      const result = parseHtml({
+        html: `${ld({
+          "@type": "NewsArticle",
+          url: pageUrl,
+          author: { "@type": "Person", name: left },
+        })}<div class="byline">${right}</div>`,
+        pageUrl,
+      });
+      expect(result.author.name, `${left} vs ${right}`).toBe("Unknown Author");
+      expect(result.review.map(({ author }) => author.name).sort()).toEqual([left, right].sort());
+    }
+
+    const vietnamese = parseHtml({
+      html: `${ld({
+        "@type": "NewsArticle",
+        url: pageUrl,
+        author: { "@type": "Person", name: "Tiếng Việt", url: "https://example.com/author/tv" },
+      })}<div class="byline"><a href="https://example.com/author/tv">Tieng Viet</a></div>`,
+      pageUrl,
+    });
+    expect(vietnamese.author.name).toBe("Tiếng Việt");
+    expect(vietnamese.review).toEqual([]);
+  });
+
+  test("preserves URL path case, ports, meaningful query keys, and repeated-value order across articles and identities", () => {
+    const pageUrl = "https://example.com/author/alice";
+    const articles = parseHtml({
+      html: ld({
+        "@type": "ItemList",
+        itemListElement: [
+          { item: { "@type": "NewsArticle", headline: "Case One Headline", url: "https://example.com/Stories/One" } },
+          { item: { "@type": "NewsArticle", headline: "Case Two Headline", url: "https://example.com/stories/one" } },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Port 8443 Headline",
+              url: "https://example.com:8443/stories/port",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Port Default Headline",
+              url: "https://example.com/stories/port",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Source RSS Headline",
+              url: "https://example.com/stories/q?source=rss",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Source Web Headline",
+              url: "https://example.com/stories/q?source=web",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Repeated Order A",
+              url: "https://example.com/stories/rep?tag=b&tag=a",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Repeated Order B",
+              url: "https://example.com/stories/rep?tag=a&tag=b",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Case Query Upper",
+              url: "https://example.com/stories/caseq?v=AbCdEf",
+            },
+          },
+          {
+            item: {
+              "@type": "NewsArticle",
+              headline: "Case Query Lower",
+              url: "https://example.com/stories/caseq?v=abcdef",
+            },
+          },
+        ],
+      }),
+      pageUrl,
+    });
+    expect(articles.articles).toHaveLength(10);
+
+    const coauthors = parseHtml({
+      html: `<div class="byline">By Newsroom and Named Writer</div>`,
+      pageUrl: "https://example.com/stories/coauthor-newsroom",
+    });
+    expect(coauthors.authors.map(({ name }) => name)).toEqual(["Newsroom", "Named Writer"]);
+  });
 });

@@ -41,19 +41,42 @@ export function decodeNuxt3(serialized: string, context: PageContext, path: stri
 }
 
 export function nuxtGraphWithinLimits(graph: unknown[], context: PageContext): boolean {
-  const pending: Array<{ index: number; depth: number }> = [{ index: 0, depth: 0 }];
-  const visited = new Set<number>();
-  let count = 0;
-  while (pending.length) {
-    const current = pending.pop()!;
-    if (current.index < 0 || current.index >= graph.length || current.depth > context.limits.maxDecodeDepth)
-      return false;
-    if (++count > context.limits.maxDecodeNodes) return false;
-    if (visited.has(current.index)) continue;
-    visited.add(current.index);
-    const value = graph[current.index];
+  const maxNodes = context.limits.maxDecodeNodes;
+  const maxDepth = context.limits.maxDecodeDepth;
+  if (graph.length === 0) return false;
+
+  const adj = new Map<number, number[]>();
+  const visited = new Set<number>([0]);
+  const queue: number[] = [0];
+  let qHead = 0;
+  let totalEdges = 0;
+
+  while (qHead < queue.length) {
+    const u = queue[qHead++]!;
+    if (u < 0 || u >= graph.length) return false;
+    const value = graph[u];
+    const children: number[] = [];
+    const seenChildren = new Set<number>();
+
+    const pushChild = (item: unknown): boolean => {
+      if (typeof item !== "number" || !Number.isInteger(item) || item < 0) return true;
+      if (item >= graph.length) return false;
+      totalEdges++;
+      if (1 + totalEdges > maxNodes) return false;
+      if (!seenChildren.has(item)) {
+        seenChildren.add(item);
+        children.push(item);
+      }
+      if (!visited.has(item)) {
+        visited.add(item);
+        if (visited.size > maxNodes) return false;
+        queue.push(item);
+      }
+      return true;
+    };
+
     if (Array.isArray(value)) {
-      if (value.length > context.limits.maxDecodeNodes) return false;
+      if (value.length > maxNodes) return false;
       const tag = typeof value[0] === "string" ? value[0] : undefined;
       let start = 0;
       let step = 1;
@@ -67,20 +90,101 @@ export function nuxtGraphWithinLimits(graph: unknown[], context: PageContext): b
         end = Math.min(2, value.length);
       } else if (value[0] === -7) {
         // devalue sparse array: [-7, length, index, reference, ...].
-        if (!Number.isSafeInteger(value[1]) || Number(value[1]) > context.limits.maxDecodeNodes) return false;
+        if (!Number.isSafeInteger(value[1]) || Number(value[1]) < 0 || Number(value[1]) > maxNodes) return false;
         start = 3;
         step = 2;
       }
-      for (let index = start; index < end; index += step) {
-        const item = value[index];
-        if (typeof item === "number" && Number.isInteger(item) && item >= 0 && tag !== "Date") {
-          pending.push({ index: item, depth: current.depth + 1 });
+      if (tag !== "Date") {
+        for (let index = start; index < end; index += step) {
+          if (!pushChild(value[index])) return false;
         }
       }
     } else if (isRecord(value)) {
-      for (const item of Object.values(value)) {
-        if (typeof item === "number" && Number.isInteger(item) && item >= 0)
-          pending.push({ index: item, depth: current.depth + 1 });
+      let propCount = 0;
+      for (const key in value) {
+        if (!Object.hasOwn(value, key)) continue;
+        if (++propCount > maxNodes) return false;
+        if (!pushChild(value[key])) return false;
+      }
+    }
+    adj.set(u, children);
+  }
+
+  // Compute SCCs via iterative Tarjan's algorithm so DAG longest-path depth runs
+  // in O(V + E) without shallow aliases masking deeper paths or exponential blowup.
+  let nextIndex = 0;
+  const indices = new Map<number, number>();
+  const lowlink = new Map<number, number>();
+  const onStack = new Set<number>();
+  const tarjanStack: number[] = [];
+  const sccs: number[][] = [];
+  const dfsStack: Array<{ node: number; edgeIdx: number }> = [{ node: 0, edgeIdx: 0 }];
+
+  while (dfsStack.length) {
+    const frame = dfsStack[dfsStack.length - 1]!;
+    const u = frame.node;
+    if (!indices.has(u)) {
+      indices.set(u, nextIndex);
+      lowlink.set(u, nextIndex);
+      nextIndex++;
+      tarjanStack.push(u);
+      onStack.add(u);
+    }
+    const neighbors = adj.get(u) ?? [];
+    if (frame.edgeIdx < neighbors.length) {
+      const v = neighbors[frame.edgeIdx++]!;
+      if (!indices.has(v)) {
+        dfsStack.push({ node: v, edgeIdx: 0 });
+      } else if (onStack.has(v)) {
+        lowlink.set(u, Math.min(lowlink.get(u)!, indices.get(v)!));
+      }
+    } else {
+      dfsStack.pop();
+      if (dfsStack.length > 0) {
+        const parent = dfsStack[dfsStack.length - 1]!.node;
+        lowlink.set(parent, Math.min(lowlink.get(parent)!, lowlink.get(u)!));
+      }
+      if (lowlink.get(u) === indices.get(u)) {
+        const comp: number[] = [];
+        for (;;) {
+          const w = tarjanStack.pop()!;
+          onStack.delete(w);
+          comp.push(w);
+          if (w === u) break;
+        }
+        sccs.push(comp);
+      }
+    }
+  }
+
+  // Tarjan emits SCCs in reverse topological order; walk forward from root 0.
+  const depth = new Map<number, number>([[0, 0]]);
+  for (let s = sccs.length - 1; s >= 0; s--) {
+    const comp = sccs[s]!;
+    if (comp.length === 1) {
+      const u = comp[0]!;
+      const d = depth.get(u) ?? 0;
+      if (d > maxDepth) return false;
+      for (const v of adj.get(u) ?? []) {
+        const nextDepth = d + 1;
+        if (nextDepth > maxDepth) return false;
+        if (v !== u && nextDepth > (depth.get(v) ?? -1)) {
+          depth.set(v, nextDepth);
+        }
+      }
+      continue;
+    }
+
+    const compSet = new Set(comp);
+    let entryDepth = 0;
+    for (const u of comp) entryDepth = Math.max(entryDepth, depth.get(u) ?? 0);
+    // Conservatively bound every simple path through a cycle, including the
+    // edge that closes it. Shortest paths cannot prove a depth limit here.
+    const nextDepth = entryDepth + comp.length;
+    if (nextDepth > maxDepth) return false;
+    for (const u of comp) {
+      for (const v of adj.get(u) ?? []) {
+        if (!compSet.has(v) && nextDepth > (depth.get(v) ?? -1)) depth.set(v, nextDepth);
       }
     }
   }

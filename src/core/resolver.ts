@@ -12,6 +12,7 @@ import {
   type ReviewAuthor,
   type TechStack,
 } from "../types";
+import { comparableHttpUrl, foldLatinDiacritics } from "../values";
 import type { PageContext } from "./context";
 import type { AuthorCandidate, ExtractedData, ValueEvidence } from "./evidence";
 
@@ -70,87 +71,37 @@ function candidateProvenance(
   return items;
 }
 
-const TRACKING_PARAMS = new Set([
-  "fbclid",
-  "gclid",
-  "dclid",
-  "msclkid",
-  "yclid",
-  "mc_cid",
-  "mc_eid",
-  "ref",
-  "ref_src",
-  "ref_url",
-  "source",
-  "src",
-  "from",
-  "s",
-  "smid",
-  "igshid",
-  "twclid",
-  "share",
-  "cmp",
-  "cmpid",
-  "ocid",
-  "ncid",
-  "guccounter",
-  "guce_referrer",
-  "guce_referrer_sig",
-  "_hsenc",
-  "_hsmi",
-  "mkt_tok",
-]);
-
-function isTrackingParam(key: string): boolean {
-  const lower = key.toLowerCase();
-  return lower.startsWith("utm_") || TRACKING_PARAMS.has(lower);
-}
-
-function canonicalSearch(searchParams: URLSearchParams): string {
-  const kept: Array<[string, string]> = [];
-  for (const [key, value] of searchParams.entries()) {
-    if (!isTrackingParam(key)) kept.push([key, value]);
-  }
-  if (!kept.length) return "";
-  kept.sort(([aKey, aVal], [bKey, bVal]) =>
-    aKey < bKey ? -1 : aKey > bKey ? 1 : aVal < bVal ? -1 : aVal > bVal ? 1 : 0,
-  );
-  const canonical = new URLSearchParams();
-  for (const [key, value] of kept) canonical.append(key, value);
-  return `?${canonical.toString()}`;
-}
-
 function sameName(a: string | undefined, b: string | undefined): boolean {
   return !!a && !!b && normalizeName(a) === normalizeName(b);
 }
 
 function normalizeName(value: string): string {
-  return value.normalize("NFKD").replace(/\p{M}/gu, "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+  return foldLatinDiacritics(value).replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function normalizedIdentity(value: string | undefined): string | undefined {
-  if (!value) return undefined;
+function normalizeSlug(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
-      const url = new URL(trimmed);
-      if (url.protocol === "http:" || url.protocol === "https:") {
-        const host = url.hostname.toLowerCase().replace(/^www\./, "");
-        const port =
-          url.port &&
-          !((url.protocol === "http:" && url.port === "80") || (url.protocol === "https:" && url.port === "443"))
-            ? `:${url.port}`
-            : "";
-        const path = (url.pathname.replace(/\/+$/, "") || "/").toLowerCase();
-        const search = canonicalSearch(url.searchParams);
-        return `https://${host}${port}${path}${search}`;
-      }
-    } catch {
-      return trimmed.replace(/\/+$/, "").toLowerCase() || undefined;
-    }
+  try {
+    return decodeURIComponent(trimmed).normalize("NFC").toLowerCase();
+  } catch {
+    return trimmed.normalize("NFC").toLowerCase();
   }
-  return trimmed.replace(/\/+$/, "").toLowerCase() || undefined;
+}
+
+function sameSlug(a: string, b: string): boolean {
+  return normalizeSlug(a) === normalizeSlug(b);
+}
+
+function candidateIdentity(candidate: AuthorCandidate): string | undefined {
+  const raw = candidate.identity?.trim();
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) {
+    return (
+      comparableHttpUrl(raw, { preserveFragment: candidate.identityKind === "jsonld-id" }) ??
+      (raw.replace(/\/+$/, "").toLowerCase() || undefined)
+    );
+  }
+  return raw.replace(/\/+$/, "").toLowerCase() || undefined;
 }
 
 function slugOf(candidate: AuthorCandidate): string | undefined {
@@ -160,11 +111,12 @@ function slugOf(candidate: AuthorCandidate): string | undefined {
 
 function sameIdentity(a: AuthorCandidate, b: AuthorCandidate): boolean {
   if (a === b) return true;
-  const left = normalizedIdentity(a.identity);
-  const right = normalizedIdentity(b.identity);
+  const left = candidateIdentity(a);
+  const right = candidateIdentity(b);
   if (left && right && left === right) return true;
   // Bridge a CMS ID to a profile URL only within its publisher namespace.
   // Slugs must never override distinct URLs or distinct CMS IDs.
+  if (a.identityKind === "jsonld-id" || b.identityKind === "jsonld-id") return false;
   const leftSlug = slugOf(a);
   const rightSlug = slugOf(b);
   if (!left || !right || !leftSlug || leftSlug !== rightSlug) return false;
@@ -189,12 +141,32 @@ function sameIdentity(a: AuthorCandidate, b: AuthorCandidate): boolean {
   }
 }
 
-function rank(candidate: AuthorCandidate): number {
+const GENERIC_BYLINE_NAMES = new Set(["staff reporter", "staff writer", "newsroom", "news desk", "editorial staff"]);
+
+function isStandaloneDomPlaceholder(candidate: AuthorCandidate, allPrimary: AuthorCandidate[]): boolean {
+  if (candidate.identity) return false;
+  const nameEvidence = candidate.evidence.name;
+  if (nameEvidence?.scope !== "byline" || !nameEvidence.source.startsWith("dom")) {
+    return false;
+  }
+  const normalized = normalizeName(candidate.profile.name ?? "");
+  if (!GENERIC_BYLINE_NAMES.has(normalized)) return false;
+  const groups = candidate.authorshipGroups;
+  if (!groups?.length) return true;
+  return !allPrimary.some(
+    (other) =>
+      other !== candidate &&
+      other.authorshipGroups?.some((group) => groups.includes(group)) &&
+      normalizeName(other.profile.name ?? "") !== normalized,
+  );
+}
+
+function rank(candidate: AuthorCandidate, allPrimary: AuthorCandidate[] = []): number {
   const evidence = candidate.evidence.name;
   if (!candidate.primary) return 10;
   if (evidence?.scope === "profile") return 0;
-  if (evidence?.scope === "byline") return 1;
-  return 2;
+  if (evidence?.scope === "byline") return isStandaloneDomPlaceholder(candidate, allPrimary) ? 2 : 1;
+  return 3;
 }
 
 interface ReviewCandidate {
@@ -212,6 +184,7 @@ function reviewValuesCompatible(left: AuthorCandidate, right: AuthorCandidate): 
     if (left.profile[field] === undefined || right.profile[field] === undefined) return true;
     if (!left.evidence[field] || !right.evidence[field]) return true;
     if (field === "name") return sameName(String(left.profile[field]), String(right.profile[field]));
+    if (field === "slug") return sameSlug(String(left.profile[field]), String(right.profile[field]));
     return left.profile[field] === right.profile[field];
   });
 }
@@ -280,14 +253,16 @@ function resolveAuthor(
   fieldPrefix = "author",
 ): AuthorProfile {
   const named = candidates.filter((candidate) => !!candidate.profile.name && !!candidate.evidence.name);
-  const primary = named
-    .filter((candidate) => candidate.primary)
-    .sort(
-      (a, b) =>
-        rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity) || Number(!!slugOf(b)) - Number(!!slugOf(a)),
-    );
+  const primaryList = named.filter((candidate) => candidate.primary);
+  const primary = primaryList.sort(
+    (a, b) =>
+      rank(a, primaryList) - rank(b, primaryList) ||
+      Number(!!b.identity) - Number(!!a.identity) ||
+      Number(!!slugOf(b)) - Number(!!slugOf(a)),
+  );
   const anchor = primary[0];
-  const strongest = anchor ? primary.filter((candidate) => rank(candidate) === rank(anchor)) : [];
+  const anchorRank = anchor ? rank(anchor, primary) : -1;
+  const strongest = anchor ? primary.filter((candidate) => rank(candidate, primary) === anchorRank) : [];
   const ambiguous =
     !!anchor &&
     strongest.some(
@@ -349,7 +324,8 @@ function resolveAuthor(
       if (
         previous !== undefined &&
         previous !== value &&
-        !(field === "name" && sameName(String(previous), String(value)))
+        !(field === "name" && sameName(String(previous), String(value))) &&
+        !(field === "slug" && sameSlug(String(previous), String(value)))
       )
         conflicting.add(field);
       else if (previous === undefined) values.set(field, value);
@@ -407,7 +383,7 @@ function resolveAuthor(
 }
 
 function membershipIdentity(candidate: AuthorCandidate): string | undefined {
-  return normalizedIdentity(candidate.identity);
+  return candidateIdentity(candidate);
 }
 
 function uniqueAuthorshipMembers(candidates: AuthorCandidate[]): AuthorCandidate[] {
@@ -474,7 +450,7 @@ function containsStrongest(members: AuthorCandidate[], strongest: AuthorCandidat
     members.some((member) => {
       if (candidate.identity && member.identity) {
         return (
-          normalizedIdentity(candidate.identity) === normalizedIdentity(member.identity) &&
+          candidateIdentity(candidate) === candidateIdentity(member) &&
           sameName(candidate.profile.name, member.profile.name)
         );
       }
@@ -502,12 +478,16 @@ function resolveAuthors(
     }
     return [author];
   }
-  const primary = candidates
-    .filter((candidate) => candidate.primary && !!candidate.profile.name && !!candidate.evidence.name)
-    .sort((a, b) => rank(a) - rank(b) || Number(!!b.identity) - Number(!!a.identity));
+  const primaryList = candidates.filter(
+    (candidate) => candidate.primary && !!candidate.profile.name && !!candidate.evidence.name,
+  );
+  const primary = primaryList.sort(
+    (a, b) => rank(a, primaryList) - rank(b, primaryList) || Number(!!b.identity) - Number(!!a.identity),
+  );
   const anchor = primary[0];
   if (!anchor) return [];
-  const strongest = primary.filter((candidate) => rank(candidate) === rank(anchor));
+  const anchorRank = rank(anchor, primary);
+  const strongest = primary.filter((candidate) => rank(candidate, primary) === anchorRank);
   if (strongest.length < 2 || strongest.some((candidate) => !candidate.authorshipGroups?.length)) return [];
   const groupKeys: string[] = [];
   for (const candidate of strongest) {
@@ -563,14 +543,7 @@ function resolveAuthors(
 }
 
 function normalizeArticleUrl(raw: string): string {
-  try {
-    const url = new URL(raw);
-    url.hash = "";
-    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
-    return url.href;
-  } catch {
-    return raw.replace(/#.*$/, "").replace(/\/+$/, "");
-  }
+  return comparableHttpUrl(raw) ?? raw.replace(/#.*$/, "").replace(/\/+$/, "");
 }
 
 function resolveArticles(

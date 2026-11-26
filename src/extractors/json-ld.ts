@@ -3,6 +3,8 @@ import type { ArticleCandidate, AuthorCandidate, ExtractedData, ValueEvidence } 
 import { emptyExtraction } from "../core/evidence";
 import type { AuthorProfile } from "../types";
 import {
+  authorSlugFromUrl,
+  comparableHttpUrl,
   dateString,
   emailAddress,
   httpUrl,
@@ -18,13 +20,19 @@ import {
 export type JsonLdResult = ExtractedData;
 
 type Entity = Record<string, unknown>;
-type IndexedEntity = { value: Entity; path: string; fieldPaths?: Record<string, string> };
+type IndexedEntity = {
+  value: Entity;
+  path: string;
+  fieldPaths?: Record<string, string>;
+  inLiveBlogUpdate?: boolean;
+};
 const MAX_ENTITIES = 20_000;
 const MAX_ARRAY_ITEMS = 500;
 const MAX_ARTICLE_TITLE = 300;
 const MAX_BIO = 2000;
 const MAX_ROLE = 200;
-const REFERENCE_STRING = /^(?:#|\/|\.\/|\.\.\/|_:|[a-z][a-z0-9+.-]*:)/i;
+const REFERENCE_STRING = /^(?:#\S*|\/\S*|\.\/\S*|\.\.\/\S*|_:\S+|[a-z][a-z0-9+.-]*:\S*)$/i;
+const BYLINE_PREFIX_STRING = /^(?:written\s+by|by)\s*:/i;
 
 const ARTICLE_TYPES = new Set([
   "Article",
@@ -46,37 +54,6 @@ const ARTICLE_TYPES = new Set([
   "MedicalScholarlyArticle",
 ]);
 
-const TRACKING_PARAMS = new Set([
-  "fbclid",
-  "gclid",
-  "dclid",
-  "msclkid",
-  "yclid",
-  "mc_cid",
-  "mc_eid",
-  "ref",
-  "ref_src",
-  "ref_url",
-  "source",
-  "src",
-  "from",
-  "s",
-  "smid",
-  "igshid",
-  "twclid",
-  "share",
-  "cmp",
-  "cmpid",
-  "ocid",
-  "ncid",
-  "guccounter",
-  "guce_referrer",
-  "guce_referrer_sig",
-  "_hsenc",
-  "_hsmi",
-  "mkt_tok",
-]);
-
 function cleanJsonLdText(raw: string): string {
   let cleaned = raw.replace(/^\uFEFF+/, "").trim();
   for (;;) {
@@ -96,7 +73,7 @@ function cleanJsonLdText(raw: string): string {
   return cleaned;
 }
 
-type WalkEntry = { value: unknown; path: string; depth: number };
+type WalkEntry = { value: unknown; path: string; depth: number; inLiveBlogUpdate: boolean };
 
 export function extractJsonLd(context: PageContext): JsonLdResult {
   const result = emptyExtraction();
@@ -124,7 +101,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
         .slice(0, MAX_ARRAY_ITEMS)
         .forEach((_, index) => rootPaths.add(`${script.path}.@graph[${index}]`));
     }
-    const stack: WalkEntry[] = [{ value: parsed, path: script.path, depth: 0 }];
+    const stack: WalkEntry[] = [{ value: parsed, path: script.path, depth: 0, inLiveBlogUpdate: false }];
     while (stack.length) {
       const current = stack.pop()!;
       if (++nodeCount > context.limits.maxDecodeNodes || entities.length >= MAX_ENTITIES) {
@@ -141,12 +118,21 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
         if (length < current.value.length)
           context.issues.push({ sourcePath: current.path, message: "JSON-LD array limit reached" });
         for (let i = length - 1; i >= 0; i--)
-          stack.push({ value: current.value[i], path: `${current.path}[${i}]`, depth: current.depth + 1 });
+          stack.push({
+            value: current.value[i],
+            path: `${current.path}[${i}]`,
+            depth: current.depth + 1,
+            inLiveBlogUpdate: current.inLiveBlogUpdate,
+          });
         continue;
       }
       if (!isRecord(current.value)) continue;
       const obj = current.value;
-      const entry: IndexedEntity = { value: obj, path: current.path };
+      const entry: IndexedEntity = {
+        value: obj,
+        path: current.path,
+        ...(current.inLiveBlogUpdate ? { inLiveBlogUpdate: true } : {}),
+      };
       if (typeof obj["@id"] === "string") {
         const id = resolveId(obj["@id"], context);
         if (id) {
@@ -160,7 +146,12 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
       for (let i = keys.length - 1; i >= 0; i--) {
         const key = keys[i]!;
         if (key === "@context") continue;
-        stack.push({ value: obj[key], path: `${current.path}.${key}`, depth: current.depth + 1 });
+        stack.push({
+          value: obj[key],
+          path: `${current.path}.${key}`,
+          depth: current.depth + 1,
+          inLiveBlogUpdate: current.inLiveBlogUpdate || key === "liveBlogUpdate",
+        });
       }
     }
   }
@@ -205,14 +196,18 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
           .forEach((item, index) => queue.push({ value: item, path: `${current.path}[${index}]` }));
       } else {
         const object = isRecord(current.value) ? current.value : undefined;
-        const isReferenceString = typeof current.value === "string" && REFERENCE_STRING.test(current.value);
-        const rawId = object ? text(object["@id"]) : isReferenceString ? (current.value as string) : undefined;
+        const trimmedString = typeof current.value === "string" ? current.value.trim() : undefined;
+        const isReferenceString =
+          trimmedString !== undefined &&
+          !BYLINE_PREFIX_STRING.test(trimmedString) &&
+          REFERENCE_STRING.test(trimmedString);
+        const rawId = object ? text(object["@id"]) : isReferenceString ? trimmedString : undefined;
         const id = rawId ? resolveId(rawId, context) : undefined;
         if (id) {
           output.push(...resolveReferences(id, object ? { value: object, path: current.path } : undefined));
         } else if (object && (isEntity(object) || isSubstantive(object))) {
           output.push({ value: object, path: current.path });
-        } else if (typeof current.value === "string" && !REFERENCE_STRING.test(current.value)) {
+        } else if (trimmedString && !isReferenceString) {
           const name = text(current.value);
           if (name) output.push({ value: { name }, path: current.path, fieldPaths: { name: current.path } });
         }
@@ -228,12 +223,35 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     return types.has("Person") || types.has("Author") || (!types.size && isSubstantive(entity));
   };
 
+  const subordinateLiveBlogPaths = new Set<string>();
+  const directUpdatePrefixes: string[] = [];
+  for (const entry of entities) {
+    if (entry.inLiveBlogUpdate) subordinateLiveBlogPaths.add(entry.path);
+    if (entry.value.liveBlogUpdate !== undefined) {
+      for (const linked of getLinked(entry.value.liveBlogUpdate, `${entry.path}.liveBlogUpdate`)) {
+        if (linked.path === entry.path) continue;
+        subordinateLiveBlogPaths.add(linked.path);
+        directUpdatePrefixes.push(`${linked.path}.`, `${linked.path}[`);
+      }
+    }
+  }
+  if (directUpdatePrefixes.length > 0) {
+    for (const entry of entities) {
+      if (directUpdatePrefixes.some((prefix) => entry.path.startsWith(prefix))) {
+        subordinateLiveBlogPaths.add(entry.path);
+      }
+    }
+  }
+
   const primaryPersonKeys = new Set<string>();
   const primaryPersonScopes = new Map<string, ValueEvidence["scope"]>();
   const primaryPersonGroups = new Map<string, string[]>();
   const hasProfilePage = entities.some((item) => schemaTypes(item.value["@type"]).has("ProfilePage"));
   const rootArticleEntries = entities.filter(
-    (item) => isArticleType(schemaTypes(item.value["@type"])) && rootPaths.has(item.path),
+    (item) =>
+      !subordinateLiveBlogPaths.has(item.path) &&
+      isArticleType(schemaTypes(item.value["@type"])) &&
+      rootPaths.has(item.path),
   );
   const personEntries = entities.filter((item) => {
     const types = schemaTypes(item.value["@type"]);
@@ -244,17 +262,33 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     const rawId = text(entity["@id"]);
     const id = rawId ? resolveId(rawId, context) : undefined;
     if (!id) return undefined;
-    const urls = new Set<string>();
+    const urls = new Map<string, string>();
     for (const ref of references.get(id) ?? []) {
       const url = httpUrl(ref.value.url, context.baseUrl);
-      if (url) urls.add(url);
+      if (url) {
+        const key = comparableHttpUrl(url) ?? url;
+        if (!urls.has(key)) urls.set(key, url);
+      }
     }
     return urls.size === 1 ? urls.values().next().value : undefined;
   };
   const publisherMatchingArticlePaths = new Set<string>();
+  const subordinateUpdatePersonKeys = new Set<string>();
   for (const entry of entities) {
     const entity = entry.value;
     const types = schemaTypes(entity["@type"]);
+    if (subordinateLiveBlogPaths.has(entry.path)) {
+      if (types.has("Person") || types.has("Author")) {
+        subordinateUpdatePersonKeys.add(entityKey(entity, entry.path, context));
+      }
+      if (isArticleType(types)) {
+        for (const linked of getLinked(entity.author, `${entry.path}.author`)) {
+          if (isRelatedPerson(linked.value)) {
+            subordinateUpdatePersonKeys.add(entityKey(linked.value, linked.path, context));
+          }
+        }
+      }
+    }
     if (isArticleType(types) && isAuthorProfileUrl(context.pageUrl)) {
       const authors = getLinked(entity.author, `${entry.path}.author`);
       const publishers = getLinked(entity.publisher, `${entry.path}.publisher`);
@@ -289,6 +323,7 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
     }
     if (
       isArticleType(types) &&
+      !subordinateLiveBlogPaths.has(entry.path) &&
       isCurrentArticle(
         entity,
         context,
@@ -326,11 +361,16 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
       for (const fragment of fragments) {
         if (!isRelatedPerson(fragment.value) || emitted.has(fragment.path)) continue;
         const key = entityKey(fragment.value, fragment.path, context);
+        const isSubordinateUpdatePerson =
+          subordinateLiveBlogPaths.has(fragment.path) ||
+          (subordinateUpdatePersonKeys.has(key) && !primaryPersonKeys.has(key));
         const rootProfile =
+          !isSubordinateUpdatePerson &&
           personIdentityKeys.size === 1 &&
           rootPaths.has(fragment.path) &&
           (!fragment.value.url || personMatchesPage(fragment.value, context));
         const pageBound =
+          !isSubordinateUpdatePerson &&
           primaryPersonKeys.size === 0 &&
           !isAuthorProfileUrl(context.pageUrl) &&
           personMatchesPage(fragment.value, context);
@@ -371,14 +411,16 @@ export function extractJsonLd(context: PageContext): JsonLdResult {
       }
     }
     if (isArticleType(types)) {
-      const current = isCurrentArticle(
-        entity,
-        context,
-        rootArticleEntries.length === 1 && rootPaths.has(entry.path),
-        hasProfilePage,
-        publisherMatchingArticlePaths.has(entry.path),
-        resolveReferences,
-      );
+      const current =
+        !subordinateLiveBlogPaths.has(entry.path) &&
+        isCurrentArticle(
+          entity,
+          context,
+          rootArticleEntries.length === 1 && rootPaths.has(entry.path),
+          hasProfilePage,
+          publisherMatchingArticlePaths.has(entry.path),
+          resolveReferences,
+        );
       if (current) {
         for (const linked of getLinked(entity.author, `${entry.path}.author`)) {
           if (!isRelatedPerson(linked.value) || emitted.has(linked.path)) continue;
@@ -454,25 +496,6 @@ function isArticleType(types: Set<string>): boolean {
   return false;
 }
 
-function isTrackingParam(key: string): boolean {
-  const lower = key.toLowerCase();
-  return lower.startsWith("utm_") || TRACKING_PARAMS.has(lower);
-}
-
-function canonicalSearch(searchParams: URLSearchParams): string {
-  const kept: Array<[string, string]> = [];
-  for (const [key, value] of searchParams.entries()) {
-    if (!isTrackingParam(key)) kept.push([key, value]);
-  }
-  if (!kept.length) return "";
-  kept.sort(([aKey, aVal], [bKey, bVal]) =>
-    aKey < bKey ? -1 : aKey > bKey ? 1 : aVal < bVal ? -1 : aVal > bVal ? 1 : 0,
-  );
-  const canonical = new URLSearchParams();
-  for (const [key, value] of kept) canonical.append(key, value);
-  return `?${canonical.toString()}`;
-}
-
 function resolveArticleUrls(
   entity: Entity,
   context: PageContext,
@@ -542,7 +565,7 @@ function isCurrentArticle(
 }
 
 function pageMatches(candidate: string, context: PageContext): boolean {
-  const target = comparablePage(candidate);
+  const target = comparableHttpUrl(candidate);
   if (!target) return false;
   const urls = [
     context.pageUrl,
@@ -550,26 +573,8 @@ function pageMatches(candidate: string, context: PageContext): boolean {
   ];
   return urls.some((value) => {
     const normalized = httpUrl(value, context.baseUrl);
-    const other = normalized ? comparablePage(normalized) : undefined;
-    return !!other && other.host === target.host && other.path === target.path && other.search === target.search;
+    return !!normalized && comparableHttpUrl(normalized) === target;
   });
-}
-
-/** Compare the identifying parts of a page URL: host, path, and non-tracking
- * query parameters. Tracking query strings, fragments, a trailing slash, `www.`,
- * and http/https differences do not make the same story a different page. */
-function comparablePage(value: string): { host: string; path: string; search: string } | undefined {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    return {
-      host: url.hostname.toLowerCase().replace(/^www\./, ""),
-      path: (url.pathname.replace(/\/+$/, "") || "/").toLowerCase(),
-      search: canonicalSearch(url.searchParams),
-    };
-  } catch {
-    return undefined;
-  }
 }
 
 function personMatchesPage(entity: Entity, context: PageContext): boolean {
@@ -579,13 +584,14 @@ function personMatchesPage(entity: Entity, context: PageContext): boolean {
 
 function httpIdUrl(value: unknown, baseUrl: string): string | undefined {
   const raw = text(value);
-  if (!raw || /^_:/i.test(raw)) return undefined;
+  if (!raw || /^(?:urn:|tag:|did:|doi:|_:)/i.test(raw)) return undefined;
   return httpUrl(raw, baseUrl);
 }
 
 function resolveId(id: string, context: PageContext): string | undefined {
   const trimmed = id.trim();
-  if (/^(?:urn:|tag:|did:|_:)/i.test(trimmed)) return trimmed;
+  if (!trimmed || /\s/.test(trimmed)) return undefined;
+  if (/^(?:urn:|tag:|did:|doi:|_:)/i.test(trimmed)) return trimmed;
   return httpUrl(trimmed, context.baseUrl);
 }
 
@@ -660,15 +666,28 @@ function personCandidate(
   if (Object.keys(profile).length === 0) return undefined;
   const explicitUrl = httpUrl(entity.url, context.baseUrl);
   if (explicitUrl) {
-    const slug = new URL(explicitUrl).pathname.split("/").filter(Boolean).at(-1);
+    const slug = authorSlugFromUrl(explicitUrl);
     if (slug) put("slug", slug, sourcePath("url", `${path}.url`));
   }
   const idUrl = httpIdUrl(entity["@id"], context.baseUrl);
   const preferredUrl = explicitUrl ?? fallbackUrl;
   const identity = preferredUrl && (!idUrl || idUrl.includes("#")) ? preferredUrl : (idUrl ?? preferredUrl);
+  let hasIdFragment = false;
+  if (idUrl) {
+    try {
+      hasIdFragment = new URL(idUrl).hash.length > 1;
+    } catch {}
+  }
+  const sameFragmentAlias =
+    hasIdFragment &&
+    !!preferredUrl &&
+    comparableHttpUrl(preferredUrl, { preserveFragment: true }) ===
+      comparableHttpUrl(idUrl!, { preserveFragment: true });
+  const identityKind = hasIdFragment && (!preferredUrl || sameFragmentAlias) ? "jsonld-id" : undefined;
   return {
     profile,
     identity,
+    ...(identityKind ? { identityKind } : {}),
     primary,
     evidence,
     ...(socialEvidence.length ? { socialEvidence } : {}),
