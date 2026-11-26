@@ -109,7 +109,7 @@ export function createPageContext(
       }
       const script: ScriptData = {
         id: element.id,
-        type: (element.getAttribute("type") ?? "").toLowerCase().trim(),
+        type: (element.getAttribute("type") ?? "").split(";")[0]?.toLowerCase().trim() ?? "",
         text: value,
         path,
       };
@@ -133,8 +133,11 @@ export function createPageContext(
         path: `link[${linkIndex++}]@href`,
       });
     } else if (!hasBase) {
-      hasBase = true;
-      context.baseUrl = httpUrl(element.getAttribute("href"), pageUrl) ?? pageUrl;
+      const baseHref = httpUrl(element.getAttribute("href"), pageUrl);
+      if (baseHref) {
+        hasBase = true;
+        context.baseUrl = baseHref;
+      }
     }
   }
   return context;

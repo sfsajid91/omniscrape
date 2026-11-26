@@ -13,6 +13,7 @@ export interface AuthorCandidate {
   profile: Partial<AuthorProfile>;
   /** Explicit profile URL or publisher-namespaced CMS ID; never a name-derived key. */
   identity?: string;
+  identityKind?: "url" | "jsonld-id" | "cms-id";
   primary: boolean;
   evidence: Partial<Record<keyof AuthorProfile, ValueEvidence>>;
   socialEvidence?: ValueEvidence[];

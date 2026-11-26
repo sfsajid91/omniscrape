@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync } from "node:fs";
 import { parseHtml } from "../src/parse";
 
 const sampleHtml = `<!DOCTYPE html>

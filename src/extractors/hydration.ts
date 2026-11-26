@@ -3,6 +3,8 @@ import type { PageContext } from "../core/context";
 import { type AuthorCandidate, type ExtractedData, emptyExtraction, type ValueEvidence } from "../core/evidence";
 import type { ArticleItem, AuthorProfile } from "../types";
 import {
+  authorSlugFromUrl,
+  comparableHttpUrl,
   dateString,
   emailAddress,
   httpUrl,
@@ -17,7 +19,13 @@ import {
 import { parseFlightRecords, recoverFlightNewlineScript, type ScriptParseResult } from "./hydration/flight";
 import { decodeNuxt3 } from "./hydration/nuxt";
 import { correlateQuintypeCollectionEntities, publisherNamespace, quintypeRoot } from "./hydration/quintype";
-import { type AstNode, assignmentName, evaluateStatic } from "./hydration/static-eval";
+import {
+  type AstNode,
+  assignmentName,
+  evaluateStatic,
+  type StaticEvalBudget,
+  StaticEvalLimitError,
+} from "./hydration/static-eval";
 
 export type HydrationResult = ExtractedData;
 
@@ -25,19 +33,63 @@ const MAX_ITEMS = 100;
 const MAX_ARTICLE_TITLE = 300;
 const MAX_BIO = 2000;
 const MAX_ROLE = 200;
+const MAX_FLIGHT_REPAIRS = 32;
 // Only names that reliably denote an article list become articles. Generic
 // `items`/`content` keys belong to menus and layout state on many sites.
 const COLLECTION_KEYS = new Set(["articles", "stories", "posts", "recentArticles", "stream"]);
+const AUTHOR_KEYS = new Set(["author", "authors", "authorData", "profile", "contributor", "contributors", "person"]);
+const EXPLICIT_NON_PERSON_TYPES = new Set([
+  "organization",
+  "newsmediaorganization",
+  "publisher",
+  "corporation",
+  "brand",
+  "website",
+  "webpage",
+  "image",
+  "imageobject",
+  "tag",
+  "category",
+]);
+const QUINTYPE_KEYS = new Set([
+  "qtLoadedData",
+  "qtData",
+  "qt",
+  "window.qtLoadedData",
+  "window.qtData",
+  "window.qt",
+  "globalThis.qtLoadedData",
+  "globalThis.qtData",
+  "globalThis.qt",
+  "self.qtLoadedData",
+  "self.qtData",
+  "self.qt",
+]);
 const ASSIGNMENT_MARKER =
-  /__NUXT__|Fusion\.globalContent|INITIAL_STATE|PRELOADED_STATE|(?:window\s*\.\s*)?(?:qtLoadedData|qtData|qt)\s*=/;
+  /__NUXT__|Fusion\.globalContent|INITIAL_STATE|PRELOADED_STATE|\b(?:(?:window|globalThis|self)\s*\.\s*)?(?:qtLoadedData|qtData|qt)\s*=/;
 
 type Source = { value: unknown; path: string; name: string; origins?: WeakMap<object, string> };
+
+function resolveHydrationSourceName(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  if (key === "__NUXT__") return "nuxt2";
+  if (key === "Fusion.globalContent") return "fusion";
+  if (key === "__INITIAL_STATE__" || key === "__PRELOADED_STATE__") return "window-state";
+  if (QUINTYPE_KEYS.has(key)) return "quintype-loaded";
+  return undefined;
+}
 
 export function extractHydrationData(context: PageContext): HydrationResult {
   const result = emptyExtraction();
   const scriptParseResults = new Map<string, ScriptParseResult>();
   const recoveredFlightPrograms = new Map<string, AstNode>();
   const sources: Source[] = [];
+  const rawTruncated: Array<{ source: string; path: string; value: unknown }> = [];
+  const budget: StaticEvalBudget = {
+    nodes: 0,
+    maxNodes: context.limits.maxDecodeNodes,
+    maxDepth: context.limits.maxDecodeDepth,
+  };
   const add = (value: unknown, path: string, name: string, origins?: WeakMap<object, string>) => {
     if (value != null) sources.push({ value, path, name, origins });
   };
@@ -45,6 +97,22 @@ export function extractHydrationData(context: PageContext): HydrationResult {
     const root = quintypeRoot(value, path);
     add(root.value, root.path, sourceName);
     correlateQuintypeCollectionEntities(root.value, root.path, sourceName, context, result);
+  };
+  const evaluateAndRecord = (initializer: AstNode, path: string, sourcePath: string, sourceName: string): void => {
+    try {
+      const value = evaluateStatic(initializer, new Map(), 0, budget);
+      if (sourceName === "quintype-loaded") addQuintype(value, path, sourceName);
+      else add(value, path, sourceName);
+    } catch (error) {
+      if (error instanceof StaticEvalLimitError) {
+        context.issues.push({ sourcePath, message: error.message });
+        if (context.includeRawHydration) {
+          rawTruncated.push({ source: sourceName, path, value: "[Truncated]" });
+        }
+      } else {
+        context.issues.push({ sourcePath, message: "Unsupported static hydration initializer" });
+      }
+    }
   };
   const parseScript = (script: { text: string; path: string; type?: string }): ScriptParseResult => {
     const previous = scriptParseResults.get(script.path);
@@ -101,11 +169,7 @@ export function extractHydrationData(context: PageContext): HydrationResult {
             context.issues.push({ sourcePath: script.path, message: "Malformed hydration script" });
             continue;
           }
-          try {
-            add(evaluateStatic(initializer, new Map()), `${script.path}@fenrirClientData`, "fenrir");
-          } catch {
-            context.issues.push({ sourcePath: script.path, message: "Unsupported static hydration initializer" });
-          }
+          evaluateAndRecord(initializer, `${script.path}@fenrirClientData`, script.path, "fenrir");
         }
       }
     } catch {
@@ -129,18 +193,23 @@ export function extractHydrationData(context: PageContext): HydrationResult {
     if ("error" in parsed) {
       if (hasFlightMarker) {
         context.issues.push({ sourcePath: script.path, message: "Malformed Flight script" });
-        const repaired = recoverFlightNewlineScript(script.text, parsed.error);
-        if (repaired !== undefined) {
+        let candidateText = script.text;
+        let currentError: unknown = parsed.error;
+        for (let attempt = 0; attempt < MAX_FLIGHT_REPAIRS; attempt++) {
+          const repaired = recoverFlightNewlineScript(candidateText, currentError);
+          if (repaired === undefined || repaired === candidateText) break;
+          candidateText = repaired;
           try {
             recoveredFlightPrograms.set(
               script.path,
-              parse(repaired, {
+              parse(candidateText, {
                 ecmaVersion: "latest",
                 sourceType: script.type === "module" ? "module" : "script",
               }) as unknown as AstNode,
             );
-          } catch {
-            /* full-script validation rejects any second syntax error */
+            break;
+          } catch (nextError) {
+            currentError = nextError;
           }
         }
       } else if (hasAssignmentMarker)
@@ -149,29 +218,24 @@ export function extractHydrationData(context: PageContext): HydrationResult {
     }
     if (!hasAssignmentMarker) continue;
     for (const statement of parsed.program.body as AstNode[]) {
-      const expression = statement.type === "ExpressionStatement" ? (statement.expression as AstNode) : undefined;
-      if (!expression || expression.type !== "AssignmentExpression" || expression.operator !== "=") continue;
-      const key = assignmentName(expression.left as AstNode);
-      const sourceName =
-        key === "__NUXT__"
-          ? "nuxt2"
-          : key === "Fusion.globalContent"
-            ? "fusion"
-            : key === "__INITIAL_STATE__" || key === "__PRELOADED_STATE__"
-              ? "window-state"
-              : ["qtLoadedData", "qtData", "qt", "window.qtLoadedData", "window.qtData", "window.qt"].includes(
-                    key ?? "",
-                  )
-                ? "quintype-loaded"
-                : undefined;
-      if (!sourceName) continue;
-      try {
-        const value = evaluateStatic(expression.right as AstNode, new Map());
-        if (sourceName === "quintype-loaded") addQuintype(value, `${script.path}@${key}`, sourceName);
-        else add(value, `${script.path}@${key}`, sourceName);
-      } catch {
-        context.issues.push({ sourcePath: script.path, message: "Unsupported static hydration initializer" });
+      if (statement.type === "VariableDeclaration") {
+        for (const declarator of statement.declarations as AstNode[]) {
+          const identifier = declarator.id as AstNode | undefined;
+          const initializer = declarator.init as AstNode | undefined;
+          if (identifier?.type !== "Identifier" || typeof identifier.name !== "string" || !initializer) continue;
+          const key = identifier.name;
+          const sourceName = resolveHydrationSourceName(key);
+          if (!sourceName) continue;
+          evaluateAndRecord(initializer, `${script.path}@${key}`, script.path, sourceName);
+        }
+        continue;
       }
+      const expression = statement.type === "ExpressionStatement" ? (statement.expression as AstNode) : undefined;
+      if (expression?.type !== "AssignmentExpression" || expression.operator !== "=") continue;
+      const key = assignmentName(expression.left as AstNode);
+      const sourceName = resolveHydrationSourceName(key);
+      if (!sourceName) continue;
+      evaluateAndRecord(expression.right as AstNode, `${script.path}@${key}`, script.path, sourceName);
     }
   }
   const flightScripts = context.scripts.filter(
@@ -182,10 +246,13 @@ export function extractHydrationData(context: PageContext): HydrationResult {
   for (const record of parseFlightRecords(flightScripts, context, scriptParseResults, recoveredFlightPrograms))
     add(record.value, record.path, "next-app", record.origins);
 
-  for (const source of sources) collect(source.value, source.path, source.name, context, result, source.origins);
+  for (const source of sources) {
+    if (budget.nodes > budget.maxNodes) break;
+    collect(source.value, source.path, source.name, context, result, budget, source.origins);
+  }
   if (context.includeRawHydration) {
     result.raw = safeRaw(
-      sources.map((s) => ({ source: s.name, path: s.path, value: s.value })),
+      [...sources.map((s) => ({ source: s.name, path: s.path, value: s.value })), ...rawTruncated],
       context,
     );
   }
@@ -204,6 +271,7 @@ function collect(
   source: string,
   context: PageContext,
   out: ExtractedData,
+  budget: StaticEvalBudget,
   origins?: WeakMap<object, string>,
 ): void {
   type Walk = {
@@ -213,15 +281,28 @@ function collect(
     depth: number;
     blocked: boolean;
     inStory: boolean;
+    inPost: boolean;
     inCollection: boolean;
+    inAuthorCollection: boolean;
     nonPrimary: boolean;
   };
   const stack: Walk[] = [
-    { value: root, path: rootPath, depth: 0, blocked: false, inStory: false, inCollection: false, nonPrimary: false },
+    {
+      value: root,
+      path: rootPath,
+      depth: 0,
+      blocked: false,
+      inStory: false,
+      inPost: false,
+      inCollection: false,
+      inAuthorCollection: false,
+      nonPrimary: false,
+    },
   ];
   const seen = new WeakMap<object, Set<number>>();
   const seenEditorial = new Set<string>();
   const isQuintype = source.toLowerCase().includes("quintype");
+  const quintypeAuthorPage = isQuintype && isRecord(root) && isRecord(root.author) && !isRecord(root.story);
   const blockedKeys = new Set(["user", "currentUser", "loggedInUser", "session", "viewer"]);
   const collectionKeys = new Set([
     "authorCollection",
@@ -244,6 +325,11 @@ function collect(
     "config",
     "seo-metadata",
     "seoMetadata",
+    "blog",
+    "linked-story",
+    "linked-stories",
+    "linkedStory",
+    "linkedStories",
     "related",
     "relatedStories",
     "related-stories",
@@ -267,21 +353,31 @@ function collect(
     "navigation",
     "nav",
   ]);
-  let nodes = 0;
   while (stack.length) {
     const current = stack.pop()!;
-    const { value, parentKey, depth, blocked, inStory, inCollection, nonPrimary } = current;
+    const { value, parentKey, depth, blocked, inStory, inPost, inCollection, inAuthorCollection, nonPrimary } = current;
     const path = value && typeof value === "object" ? (origins?.get(value) ?? current.path) : current.path;
-    if (++nodes > context.limits.maxDecodeNodes) {
+    if (++budget.nodes > budget.maxNodes) {
       context.issues.push({ sourcePath: path, message: "Hydration traversal limit exceeded" });
       break;
     }
-    if (depth > context.limits.maxDecodeDepth) {
+    if (depth > budget.maxDepth) {
       context.issues.push({ sourcePath: path, message: "Hydration depth limit exceeded" });
       continue;
     }
     if (!value || typeof value !== "object") continue;
-    const contextKey = (inStory ? 1 : 0) | (inCollection ? 2 : 0) | (blocked ? 4 : 0) | (nonPrimary ? 8 : 0);
+    const typedPerson =
+      !Array.isArray(value) &&
+      (hasPersonType(value as Record<string, unknown>) || isAuthorProfileResource(value as Record<string, unknown>));
+    const explicitAuthorPath = AUTHOR_KEYS.has(parentKey ?? "") || (parentKey === "mainEntity" && typedPerson);
+    const contextKey =
+      (inStory ? 1 : 0) |
+      (inCollection ? 2 : 0) |
+      (blocked ? 4 : 0) |
+      (nonPrimary ? 8 : 0) |
+      (explicitAuthorPath ? 16 : 0) |
+      (inPost ? 32 : 0) |
+      (inAuthorCollection ? 64 : 0);
     let contexts = seen.get(value);
     if (!contexts) {
       contexts = new Set();
@@ -290,7 +386,8 @@ function collect(
     if (contexts.has(contextKey)) continue;
     contexts.add(contextKey);
     if (Array.isArray(value)) {
-      const length = Math.min(value.length, Math.max(0, context.limits.maxDecodeNodes - nodes));
+      const remaining = Math.max(0, budget.maxNodes - budget.nodes - stack.length);
+      const length = Math.min(value.length, remaining);
       if (length < value.length)
         context.issues.push({ sourcePath: path, message: "Hydration array traversal limit exceeded" });
       for (let i = length - 1; i >= 0; i--)
@@ -301,21 +398,20 @@ function collect(
           depth: depth + 1,
           blocked,
           inStory,
+          inPost,
           inCollection,
+          inAuthorCollection,
           nonPrimary,
         });
       continue;
     }
     const obj = value as Record<string, unknown>;
-    const typedPerson = hasPersonType(obj) || isAuthorProfileResource(obj);
     const explicitNonPerson = hasNonPersonType(obj);
-    const authorKeys = ["author", "authors", "authorData", "profile", "contributor", "contributors", "person"];
-    const explicitAuthorPath = authorKeys.includes(parentKey ?? "") || (parentKey === "mainEntity" && typedPerson);
     const personSpecific = hasPersonSpecificShape(obj) || (isAuthorProfileResource(obj) && !!text(obj.fullName));
     const pageProfileRoute = isAuthorProfileUrl(context.pageUrl);
     const profileResourceTarget =
       isAuthorProfileResource(obj) && pageProfileRoute && !hasExplicitDifferentUrl(obj, context);
-    const currentRelation = inStory && authorKeys.includes(parentKey ?? "") && !blocked && !inCollection && !nonPrimary;
+    const currentRelation = inStory && AUTHOR_KEYS.has(parentKey ?? "") && !blocked && !inCollection && !nonPrimary;
     const profileResourceDifferent =
       isAuthorProfileResource(obj) && pageProfileRoute && hasExplicitDifferentUrl(obj, context);
     const primary =
@@ -355,6 +451,7 @@ function collect(
               source,
               context,
               out,
+              false,
             );
         }
       }
@@ -365,7 +462,7 @@ function collect(
       parentKey === "author" &&
       isRecord(obj.profile) &&
       !hasNonPersonType(obj.profile) &&
-      text(obj.profile.name ?? obj.profile.display_name ?? obj.profile.displayName)
+      extractAuthorName(obj.profile)
     ) {
       const outerId =
         typeof obj.authorId === "string" || (typeof obj.authorId === "number" && Number.isFinite(obj.authorId))
@@ -383,19 +480,12 @@ function collect(
           source,
           context,
           out,
+          inPost && candidate.primary && !nonPrimary && !inCollection,
         );
     } else if (
       !(isQuintype && parentKey === "story") &&
       candidateAllowed &&
-      text(
-        obj.name ??
-          obj.display_name ??
-          obj.displayName ??
-          obj.fullName ??
-          obj["author-name"] ??
-          obj.author_name ??
-          obj.authorName,
-      ) &&
+      extractAuthorName(obj) &&
       !blockedKeys.has(parentKey ?? "") &&
       !nonAuthorKeys.has(parentKey ?? "")
     ) {
@@ -423,12 +513,15 @@ function collect(
           source,
           context,
           out,
+          inPost && candidate.primary && !nonPrimary && !inCollection,
         );
     }
-    if (!nonPrimary) collectEditorial(obj, path, source, out, seenEditorial);
+    if (!nonPrimary && (!inCollection || inAuthorCollection)) collectEditorial(obj, path, source, out, seenEditorial);
     const isQuintypeCollection = isQuintype && obj.type === "collection";
     if (isQuintypeCollection) addArticles(obj, path, source, context, out);
-    for (const [key, child] of Object.entries(obj)) {
+    for (const key in obj) {
+      if (!Object.hasOwn(obj, key)) continue;
+      const child = obj[key];
       const childPath = `${path}.${key}`;
       if (
         collectionKeys.has(key) ||
@@ -443,6 +536,10 @@ function collect(
         typeof child === "object" &&
         !(key === "profile" && parentKey === "author" && obj.authorId !== undefined)
       ) {
+        if (budget.nodes + stack.length >= budget.maxNodes) {
+          context.issues.push({ sourcePath: path, message: "Hydration traversal limit exceeded" });
+          break;
+        }
         const cardCollection = ["cards", "feed", "teasers"].includes(key) && isStoryCardArray(child, context.baseUrl);
         const childCollection =
           inCollection ||
@@ -452,16 +549,24 @@ function collect(
           (key === "collection" && isQuintype) ||
           cardCollection ||
           (key === "content" && isListingContainer(obj));
-        const childStory = inStory || ["story", "article", "current"].includes(key);
+        const childStory = inStory || ["story", "article", "current", "entry", "blogPost", "post"].includes(key);
+        const childPost = inPost || key === "post";
+        const childNonPrimary = nonPrimary || nonPrimaryKeys.has(key);
+        const childAuthorCollection =
+          quintypeAuthorPage &&
+          !childNonPrimary &&
+          (inAuthorCollection || (!inStory && !inCollection && (key === "authorCollection" || key === "collection")));
         stack.push({
           value: child,
           path: childPath,
           parentKey: key,
           depth: depth + 1,
-          blocked: blocked || blockedKeys.has(key),
+          blocked: blocked || blockedKeys.has(key) || nonAuthorKeys.has(key),
           inStory: childStory,
+          inPost: childPost,
           inCollection: childCollection,
-          nonPrimary: nonPrimary || nonPrimaryKeys.has(key),
+          inAuthorCollection: childAuthorCollection,
+          nonPrimary: childNonPrimary,
         });
       }
     }
@@ -511,17 +616,17 @@ function pushAuthorCandidate(
   source: string,
   context: PageContext,
   out: ExtractedData,
+  allowPostBioEmail = false,
 ): void {
   const directEmail = emailAddress(obj.email);
   const socialEmail = isRecord(obj.socialLinks) ? emailAddress(obj.socialLinks.email) : undefined;
   const bio = profileBio(obj);
   const bioEmail = bio && emailAddress(bio);
+  const allowBioEmail = candidate.evidence.bio?.scope === "profile" || allowPostBioEmail;
   const emails = [
     ...(directEmail ? [{ value: directEmail, path: `${path}.email` }] : []),
     ...(socialEmail ? [{ value: socialEmail, path: `${path}.socialLinks.email` }] : []),
-    ...(bioEmail && candidate.profile.name && candidate.evidence.bio?.scope === "profile"
-      ? [{ value: bioEmail, path: bioPath(obj, path) }]
-      : []),
+    ...(bioEmail && candidate.profile.name && allowBioEmail ? [{ value: bioEmail, path: bioPath(obj, path) }] : []),
   ];
   const unique = [...new Map(emails.map((item) => [item.value, item])).values()];
   if (unique.length > 1) {
@@ -590,16 +695,27 @@ function hasPersonType(value: Record<string, unknown>): boolean {
 }
 
 function hasNonPersonType(value: Record<string, unknown>): boolean {
+  if (hasPersonType(value) || isAuthorProfileResource(value)) return false;
   const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
   const normalized = types
     .filter((type): type is string => typeof type === "string" && !!type.trim())
-    .map((type) => type.toLowerCase().split(/[/#]/).pop() ?? "");
+    .map((type) => type.trim().toLowerCase().split(/[/#]/).pop() ?? "");
   // A hybrid type such as ["Person", "Employee"] still describes a person.
-  return normalized.length > 0 && !normalized.includes("person");
+  if (normalized.length > 0 && !normalized.includes("person")) return true;
+  const secondaryTypes = [value.type, value.__typename]
+    .flatMap((entry) => (Array.isArray(entry) ? entry : [entry]))
+    .filter((entry): entry is string => typeof entry === "string" && !!entry.trim())
+    .map((entry) => entry.trim().toLowerCase().split(/[/#]/).pop() ?? "");
+  return secondaryTypes.some((entry) => EXPLICIT_NON_PERSON_TYPES.has(entry));
 }
 
 function hasPersonSpecificShape(value: Record<string, unknown>): boolean {
-  const hasNameParts = !!(text(value.givenName) || text(value.familyName));
+  const hasNameParts = !!(
+    text(value.givenName) ||
+    text(value.familyName) ||
+    (text(value.firstName) && text(value.lastName)) ||
+    (text(value.first_name) && text(value.last_name))
+  );
   const hasAuthorId = ["authorId", "author_id", "naturalId", "legacy_id", "muckrackId"].some(
     (key) =>
       (typeof value[key] === "string" && !!text(value[key])) ||
@@ -614,6 +730,25 @@ function hasPersonSpecificShape(value: Record<string, unknown>): boolean {
   const hasProfileUrl = !!(text(value.profileUrl) || text(value.profile_url));
   const hasEmailWithPersonSignal = !!text(value.email) && (hasNameParts || hasSocial || hasProfileUrl);
   return hasNameParts || hasAuthorId || hasSocial || hasRoleAndBio || hasProfileUrl || hasEmailWithPersonSignal;
+}
+
+function extractAuthorName(obj: Record<string, unknown>): { name: string; property: string } | undefined {
+  const nameKey = ["name", "display_name", "displayName", "fullName", "author-name", "author_name", "authorName"].find(
+    (key) => personName(obj[key]),
+  );
+  if (nameKey) {
+    const name = personName(obj[nameKey]);
+    if (name) return { name, property: nameKey };
+  }
+  const firstKey = ["givenName", "firstName", "first_name"].find((key) => text(obj[key]));
+  const lastKey = ["familyName", "lastName", "last_name"].find((key) => text(obj[key]));
+  const first = firstKey ? text(obj[firstKey]) : undefined;
+  const last = lastKey ? text(obj[lastKey]) : undefined;
+  if (first && last) {
+    const combined = personName(`${first} ${last}`);
+    if (combined) return { name: combined, property: firstKey! };
+  }
+  return undefined;
 }
 
 function authorCandidate(
@@ -638,10 +773,8 @@ function authorCandidate(
       confidence,
     };
   };
-  const nameKey = ["name", "display_name", "displayName", "fullName", "author-name", "author_name", "authorName"].find(
-    (key) => personName(obj[key]),
-  );
-  put("name", nameKey ? personName(obj[nameKey]) : undefined, nameKey ?? "name");
+  const extractedName = extractAuthorName(obj);
+  put("name", extractedName?.name, extractedName?.property ?? "name");
   const idKey = ["id", "_id", "authorId", "naturalId", "legacy_id", "author-id", "author_id"].find(
     (key) =>
       (typeof obj[key] === "string" && !!text(obj[key])) || (typeof obj[key] === "number" && Number.isFinite(obj[key])),
@@ -715,12 +848,16 @@ function authorCandidate(
   if (!profile.name) return undefined;
   const explicitUrl = [obj.profileUrl, obj.url].map((value) => httpUrl(value, context.baseUrl)).find(Boolean);
   if (!profile.slug && explicitUrl) {
-    const slug = new URL(explicitUrl).pathname.split("/").filter(Boolean).at(-1);
+    const slug = authorSlugFromUrl(explicitUrl);
     if (slug) put("slug", slug, "profileUrl");
   }
   const identity =
     explicitUrl ?? (id !== undefined ? `${source}@${publisherNamespace(context)}:${String(id)}` : undefined);
   return { profile, identity, primary, evidence, socialEvidence };
+}
+
+function normalizeComparableUrl(rawUrl: string): string {
+  return comparableHttpUrl(rawUrl) ?? rawUrl;
 }
 
 function addArticles(value: unknown, path: string, source: string, context: PageContext, out: ExtractedData): void {
@@ -736,6 +873,7 @@ function addArticles(value: unknown, path: string, source: string, context: Page
   const hearstContent = source === "next-pages" && listPath.endsWith(".author.content");
   const slugBase =
     source.startsWith("quintype") || hearstContent ? new URL("/", context.pageUrl).href : context.baseUrl;
+  const comparablePageUrl = normalizeComparableUrl(context.pageUrl);
   for (let i = 0; i < Math.min(entries.length, MAX_ITEMS); i++) {
     const entry = entries[i];
     if (!isRecord(entry)) continue;
@@ -760,6 +898,7 @@ function addArticles(value: unknown, path: string, source: string, context: Page
       url = httpUrl(`${section.replace(/^\/+|\/+$/g, "")}/${slug}/`, slugBase);
     }
     if (!title || title.length > MAX_ARTICLE_TITLE || !url) continue;
+    if (isAuthorProfileUrl(url) || normalizeComparableUrl(url) === comparablePageUrl) continue;
     const dateKey = ["publishedAt", "published_at", "date", "publishDate", "publish_from", "first-published-at"].find(
       (key) => dateString(item[key]),
     );
@@ -840,20 +979,100 @@ function getPath(value: unknown, path: string[]): unknown {
 }
 
 function safeRaw(value: unknown, context: PageContext): unknown {
-  const seen = new WeakSet<object>();
+  const ancestors = new Set<object>();
   let count = 0;
-  try {
-    return JSON.parse(
-      JSON.stringify(value, (_key, item) => {
-        if (typeof item === "bigint") return `${item.toString()}n`;
-        if (item && typeof item === "object") {
-          if (seen.has(item)) return "[Circular]";
-          seen.add(item);
-          if (++count > context.limits.maxDecodeNodes) return "[Truncated]";
+  let truncated = false;
+  const maxNodes = context.limits.maxDecodeNodes;
+  const maxDepth = context.limits.maxDecodeDepth;
+
+  const clone = (item: unknown, depth: number): unknown => {
+    if (++count > maxNodes || depth > maxDepth) {
+      truncated = true;
+      return "[Truncated]";
+    }
+    if (typeof item === "bigint") return `${item.toString()}n`;
+    if (item === null || item === undefined) return item;
+    if (typeof item === "number") return Number.isFinite(item) ? item : null;
+    if (typeof item === "string" || typeof item === "boolean") return item;
+    if (typeof item === "function" || typeof item === "symbol") return undefined;
+    if (typeof item !== "object") return undefined;
+
+    if (ancestors.has(item)) return "[Circular]";
+
+    if (item instanceof Date) {
+      return Number.isFinite(item.getTime()) ? item.toISOString() : null;
+    }
+    if (item instanceof RegExp) {
+      return item.toString();
+    }
+    if (ArrayBuffer.isView(item)) {
+      return `[${item.constructor.name}(${item.byteLength})]`;
+    }
+
+    ancestors.add(item);
+    try {
+      if (item instanceof Set) {
+        const arr: unknown[] = [];
+        for (const entry of item) {
+          if (count >= maxNodes) {
+            truncated = true;
+            arr.push("[Truncated]");
+            break;
+          }
+          const cloned = clone(entry, depth + 1);
+          arr.push(cloned === undefined ? null : cloned);
         }
-        return item;
-      }),
-    );
+        return arr;
+      }
+      if (item instanceof Map) {
+        const obj: Record<string, unknown> = {};
+        for (const [k, v] of item.entries()) {
+          if (count >= maxNodes) {
+            truncated = true;
+            obj["[Truncated]"] = true;
+            break;
+          }
+          const cloned = clone(v, depth + 1);
+          if (cloned !== undefined) obj[String(k)] = cloned;
+        }
+        return obj;
+      }
+      if (Array.isArray(item)) {
+        const arr: unknown[] = [];
+        for (let i = 0; i < item.length; i++) {
+          if (count >= maxNodes) {
+            truncated = true;
+            arr.push("[Truncated]");
+            break;
+          }
+          const cloned = clone(item[i], depth + 1);
+          arr.push(cloned === undefined ? null : cloned);
+        }
+        return arr;
+      }
+      const obj: Record<string, unknown> = {};
+      for (const key in item as Record<string, unknown>) {
+        if (!Object.hasOwn(item, key)) continue;
+        if (count >= maxNodes) {
+          truncated = true;
+          obj["[Truncated]"] = true;
+          break;
+        }
+        const cloned = clone((item as Record<string, unknown>)[key], depth + 1);
+        if (cloned !== undefined) obj[key] = cloned;
+      }
+      return obj;
+    } finally {
+      ancestors.delete(item);
+    }
+  };
+
+  try {
+    const result = clone(value, 0);
+    if (truncated) {
+      context.issues.push({ sourcePath: "rawHydration", message: "Raw hydration snapshot truncated" });
+    }
+    return result;
   } catch {
     return undefined;
   }
